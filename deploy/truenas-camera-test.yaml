@@ -1,0 +1,41 @@
+# TrueNAS Install via YAML. Replace password, camera path/GID and POOL paths.
+# Pull the private GHCR image first; see docs/truenas-first-test.md.
+services:
+  queue:
+    image: ghcr.io/tammuzgreeen/arm-season-queue:main
+    pull_policy: never
+    restart: unless-stopped
+    user: "568:568"
+    group_add:
+      - "REPLACE_WITH_CAMERA_GID"
+    devices:
+      - "/dev/v4l/by-id/REPLACE_WITH_CAPTURE_DEVICE:/dev/video0:rw"
+    ports:
+      - "8099:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      QUEUE_USER: operator
+      QUEUE_PASSWORD: "REPLACE_WITH_GENERATED_PASSWORD"
+      # Camera-only test. Later set the configured ARM backend origin.
+      ARM_URL: ""
+      ARM_EXPECTED_VERSION: "19.1.0"
+      ARM_VERIFIED_SOURCE_SHA: ""
+      ARM_DRIVE: /dev/sr0
+      ARM_MEDIA_PREFIX: /home/arm/media
+      CAMERA_DEVICE: /dev/video0
+      # Initial request, not a claim of this camera's supported capture modes.
+      CAMERA_WIDTH: "1920"
+      CAMERA_HEIGHT: "1080"
+      CAMERA_FPS: "15"
+      OCR_LANG: deu+eng
+      TZ: Europe/Berlin
+    volumes:
+      - /mnt/POOL/apps/arm-season-queue/state:/state
+      - /mnt/POOL/apps/arm-season-queue/handover:/handover
+      # Add for ARM integration, using its existing host media directory:
+      # - /mnt/POOL/apps/arm/media:/media:ro
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=512m,mode=1777"]

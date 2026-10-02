@@ -1,0 +1,71 @@
+schema_version: 1
+id: ds9-s02-de-part1
+series: Star Trek Deep Space Nine
+season: 2
+provider_ids: {}
+edition: de-dvd-s02-part1
+edition_name: German DVD Part 1
+title_aliases: [Deep Space Nine]
+# Replace with text actually readable on this release, then approve the list.
+edition_tokens: [Teil 1]
+approved: false
+provenance:
+  - 'Project brief: German DVD Season 2 Part 1; printed episode list supplied by owner.'
+  - Project brief explicitly accepts MakeMKV IDs 0..3 -> DVD titles 1..4 for Disc 1.
+unresolved:
+  - Confirm edition_tokens against the physical label/packaging; remove this entry after review.
+discs:
+  - id: disc-1
+    number: 1
+    printed_identifiers: []
+    labels: [EU_103539]
+    order: ascending_dvd_title
+    expected_title_count: 4
+    # No selection override: the scan must contain exactly four eligible titles.
+    selection_ids: []
+    title_map:
+      - {makemkv_id: 0, dvd_title: 1, episode_index: 0, evidence: Owner-approved Disc 1 source scan}
+      - {makemkv_id: 1, dvd_title: 2, episode_index: 1, evidence: Owner-approved Disc 1 source scan}
+      - {makemkv_id: 2, dvd_title: 3, episode_index: 2, evidence: Owner-approved Disc 1 source scan}
+      - {makemkv_id: 3, dvd_title: 4, episode_index: 3, evidence: Owner-approved Disc 1 source scan}
+    episodes:
+      - {printed: '1', number: 1, title: Die Heimkehr}
+      - {printed: '2', number: 2, title: Der Kreis}
+      - {printed: '3', number: 3, title: Die Belagerung}
+      - {printed: '4', number: 4, title: Der Symbiont}
+    inventory:
+      video_codec: mpeg2video
+      width: 720
+      height: 576
+      fps: 25
+      chapters: 8
+      audio: [deu, eng, spa, fra, ita]
+      audio_channels: [6, 6, 2, 2, 2]
+      subtitles: [dan, deu, eng, eng, spa, fra, ita, nld, nor, swe]
+      complete: true
+      evidence: Owner-supplied Disc 1 scan; 4:3, MPEG-2, 25fps, five audio and ten subtitle streams retained in MKVs.
+    unresolved: []
+  - id: disc-2
+    number: 2
+    order: ascending_dvd_title
+    expected_title_count: 4
+    episodes:
+      - {printed: '5', number: 5, title: Die Konspiration}
+      - {printed: '6', number: 6, title: Das Melora-Problem}
+      - {printed: '7', number: 7, title: Profit oder Partner}
+      - {printed: '8', number: 8, title: Die Ermittlung}
+    unresolved:
+      - Establish MakeMKV IDs and original DVD-title numbers from this disc's scan.
+      - Establish complete source stream inventory for this disc.
+  - id: disc-3
+    number: 3
+    order: ascending_dvd_title
+    expected_title_count: 4
+    episodes:
+      - {printed: '9', number: 9, title: Rätselhafte Fenna}
+      - {printed: '10', number: 10, title: Auge des Universums}
+      - {printed: '11', number: 11, title: Rivalen}
+      - {printed: '12', number: 12, title: Metamorphosen}
+    unresolved:
+      - Establish MakeMKV IDs and original DVD-title numbers from this disc's scan.
+      - Establish complete source stream inventory for this disc.

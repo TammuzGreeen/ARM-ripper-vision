@@ -1,0 +1,21 @@
+schema_version: 1
+id: star-trek-ds9
+series:
+  name: "Star Trek Deep Space Nine"
+  year: 1993
+  imdb_id: tt0106145
+seasons:
+  - season: 2
+    discs:
+      - disc: 1
+        episodes:
+          - {episode: 1, title: "Die Heimkehr", source_title: 0}
+          - {episode: 2, title: "Der Kreis", source_title: 1}
+          - {episode: 3, title: "Die Belagerung", source_title: 2}
+          - {episode: 4, title: "Der Symbiont", source_title: 3}
+      - disc: 2
+        episodes:
+          - {episode: 5, title: "Die Konspiration", source_title: 0}
+          - {episode: 6, title: "Das Melora-Problem", source_title: 1}
+          - {episode: 7, title: "Profit oder Partner", source_title: 2}
+          - {episode: 8, title: "Die Ermittlung", source_title: 3}

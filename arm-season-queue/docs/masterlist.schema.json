@@ -1,0 +1,404 @@
+{
+  "$defs": {
+    "Disc": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "number": {
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "printed_identifiers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Printed Identifiers",
+          "type": "array"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "episodes": {
+          "items": {
+            "$ref": "#/$defs/Episode"
+          },
+          "minItems": 1,
+          "title": "Episodes",
+          "type": "array"
+        },
+        "expected_title_count": {
+          "minimum": 1,
+          "title": "Expected Title Count",
+          "type": "integer"
+        },
+        "order": {
+          "enum": [
+            "ascending_dvd_title",
+            "explicit"
+          ],
+          "title": "Order",
+          "type": "string"
+        },
+        "selection_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Selection Ids",
+          "type": "array"
+        },
+        "title_map": {
+          "items": {
+            "$ref": "#/$defs/TitleMap"
+          },
+          "title": "Title Map",
+          "type": "array"
+        },
+        "structural_signature": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Structural Signature"
+        },
+        "inventory": {
+          "$ref": "#/$defs/Inventory"
+        },
+        "unresolved": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "number",
+        "episodes",
+        "expected_title_count",
+        "order"
+      ],
+      "title": "Disc",
+      "type": "object"
+    },
+    "Episode": {
+      "additionalProperties": false,
+      "properties": {
+        "printed": {
+          "title": "Printed",
+          "type": "string"
+        },
+        "number": {
+          "maximum": 999,
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "maximum": 999,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "part": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Part"
+        },
+        "numbering_note": {
+          "default": "",
+          "title": "Numbering Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "printed",
+        "number",
+        "title"
+      ],
+      "title": "Episode",
+      "type": "object"
+    },
+    "Inventory": {
+      "additionalProperties": false,
+      "properties": {
+        "video_codec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Video Codec"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "fps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fps"
+        },
+        "chapters": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Chapters"
+        },
+        "audio": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Audio",
+          "type": "array"
+        },
+        "subtitles": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Subtitles",
+          "type": "array"
+        },
+        "audio_channels": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Audio Channels",
+          "type": "array"
+        },
+        "complete": {
+          "default": false,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "evidence": {
+          "default": "",
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "title": "Inventory",
+      "type": "object"
+    },
+    "TitleMap": {
+      "additionalProperties": false,
+      "properties": {
+        "makemkv_id": {
+          "minimum": 0,
+          "title": "Makemkv Id",
+          "type": "integer"
+        },
+        "dvd_title": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dvd Title"
+        },
+        "angle": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Angle"
+        },
+        "episode_index": {
+          "minimum": 0,
+          "title": "Episode Index",
+          "type": "integer"
+        },
+        "evidence": {
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "makemkv_id",
+        "episode_index",
+        "evidence"
+      ],
+      "title": "TitleMap",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[a-zA-Z0-9_-]+$",
+      "title": "Id",
+      "type": "string"
+    },
+    "series": {
+      "minLength": 1,
+      "title": "Series",
+      "type": "string"
+    },
+    "season": {
+      "maximum": 99,
+      "minimum": 0,
+      "title": "Season",
+      "type": "integer"
+    },
+    "provider_ids": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Provider Ids",
+      "type": "object"
+    },
+    "edition": {
+      "minLength": 1,
+      "title": "Edition",
+      "type": "string"
+    },
+    "edition_name": {
+      "minLength": 1,
+      "title": "Edition Name",
+      "type": "string"
+    },
+    "title_aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Title Aliases",
+      "type": "array"
+    },
+    "edition_tokens": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Edition Tokens",
+      "type": "array"
+    },
+    "approved": {
+      "default": false,
+      "title": "Approved",
+      "type": "boolean"
+    },
+    "provenance": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Provenance",
+      "type": "array"
+    },
+    "unresolved": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unresolved",
+      "type": "array"
+    },
+    "discs": {
+      "items": {
+        "$ref": "#/$defs/Disc"
+      },
+      "minItems": 1,
+      "title": "Discs",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "series",
+    "season",
+    "edition",
+    "edition_name",
+    "edition_tokens",
+    "discs"
+  ],
+  "title": "Masterlist",
+  "type": "object"
+}

@@ -1,0 +1,17 @@
+{
+  "sha": "f6ec2e3fd47cf951e89094e0a9d6999ab94d781f",
+  "files": {
+    "VERSION": "e53820b25fc456e32f7753f967a21f2405ec7421b8d447837d193e41921786f0",
+    "arm/api/v1/jobs.py": "4c2722f8bfe8457c61b5eb78b064bff6e9f56871c2dd0331f4d667f7faad1e5e",
+    "arm/api/v1/system.py": "776a14609b62e0695f1b764c0f8891ffd095614cf2fcb7e0a1ccbd564e8f26a3",
+    "arm/api/v1/drives.py": "67c8f492e11c765faa5824536e8ba0312d8c66d46ec7b871b94b84cfc68c20b8",
+    "arm/api/v1/settings.py": "85fb49ac1bee95576facd44f3bbcde7c4db3badc1ea2762fa75fb76ccdf00c90",
+    "arm/ripper/main.py": "de140cced67193a7938a8000f17179e1c9bf5c07ca7d96b1ff836fc45f8db544",
+    "arm/ripper/utils.py": "3d34aa510477046b78f2d7a04e91d8fb2eb2c2f0162f03e148c5e6690da6c7aa",
+    "arm/ripper/makemkv.py": "3e03e294661350e411233a46fac2208ce6085e73022e9ef8a4a83fe55b2276c0",
+    "arm/ripper/arm_ripper.py": "31cbd2513d5f4a50f22e7d8e2e44914cda6c11037dedefda8f6f9904a9eeb7d3",
+    "arm/ripper/naming.py": "09e8e7be8522b162869adb47ea1142cd58d66ed96c36c20d0bdea1c8c78c4be0",
+    "arm/models/job.py": "f61f63cf99cca48208f8f13ba8923a3b012bbec5198d3e70e30bc48010cdd033",
+    "arm/models/track.py": "fdf9c7325e95740f86b2c05509bcb5da07921cbb9704e29b7f43b32bd50c9edb"
+  }
+}

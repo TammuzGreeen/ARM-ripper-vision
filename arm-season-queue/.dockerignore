@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+state
+handover
+library
+__pycache__
+**/__pycache__
+tests
+*.zip
+deployment-report.json
