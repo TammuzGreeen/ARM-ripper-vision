@@ -36,6 +36,22 @@ def extract(text, confidence=0.0, barcodes=None):
             'languages': re.findall(r'\b(?:deutsch|german|english|englisch|french|français|spanish|español|italiano)\b', text, re.I)}
 
 
+def read_words(data):
+    """Keep uncertain words for display only; matching still uses >=80 scores."""
+    lines, observed, scores = {}, {}, []
+    for i, word in enumerate(data['text']):
+        score = float(data['conf'][i])
+        if not word.strip() or score < 0:
+            continue
+        key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
+        observed.setdefault(key, []).append(word)
+        if score >= 80:
+            lines.setdefault(key, []).append(word)
+            scores.append(score)
+    join = lambda groups: '\n'.join(' '.join(words) for words in groups.values())
+    return join(lines), join(observed), scores
+
+
 def ocr(frame, language):
     import cv2
     import numpy as np
@@ -54,16 +70,10 @@ def ocr(frame, language):
     for rotation in range(4):
         candidate = np.rot90(gray, rotation).copy()
         data = pytesseract.image_to_data(candidate, lang=language, config='--psm 11', output_type=pytesseract.Output.DICT, timeout=30)
-        lines, scores = {}, []
-        for i, word in enumerate(data['text']):
-            score = float(data['conf'][i])
-            if word.strip() and score >= 80:
-                key = (data['block_num'][i], data['par_num'][i], data['line_num'][i])
-                lines.setdefault(key, []).append(word)
-                scores.append(score)
-        text = '\n'.join(' '.join(words) for words in lines.values())
-        quality = sum(scores)  # prefer the orientation containing coherent readable text
+        text, observed, scores = read_words(data)
+        quality = (sum(scores), len(observed))
         result = extract(text, sum(scores)/max(1,len(scores))/100, barcodes)
+        result['observed_text'] = observed  # Never passed into identity matching.
         result['rotation'] = rotation*90
         if best is None or quality > best[0]:
             best = (quality, result)
@@ -122,4 +132,5 @@ def match(result, masters):
                                 'masterlist_sha256':digest(master),
                                 'confidence': min(f['confidence'] for f in good)})
     return matches
+
 

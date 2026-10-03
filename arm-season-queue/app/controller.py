@@ -95,11 +95,14 @@ class Controller:
         if result.get('accepted') and len(matches)!=1:
             result['reason'] = 'No unique approved edition match; review printed evidence or recapture'
         with self.db.connect() as db:
-            old = db.execute('SELECT body FROM events WHERE id=?',(event,)).fetchone()
-            if old:
+            old = db.execute('SELECT body,status FROM events WHERE id=?',(event,)).fetchone()
+            if old and old['status'] in ('processing','invalidated','expired'):
                 body = json.loads(old['body'])
-                body.update(result=result,matches=matches)
-                db.execute("UPDATE events SET body=?,status=? WHERE id=? AND status='processing'",(encode(body),status,event))
+                # Keep late OCR as inspectable evidence, without restoring eligibility.
+                eligible = old['status']=='processing'
+                body.update(result=result,matches=matches if eligible else [])
+                db.execute('UPDATE events SET body=?,status=? WHERE id=?',
+                           (encode(body),status if eligible else old['status'],event))
 
     def review_event(self, event, master_id, disc_id, note, job=None):
         if not note.strip():
@@ -180,19 +183,30 @@ class Controller:
 
     def run(self):
         while not self.stop.is_set():
+            self.poll_once()
+            self.stop.wait(3)
+
+    def poll_once(self):
+        # Camera-only setup is a supported mode, not an ARM polling outage.
+        if not self.s.arm_url:
+            self.status = 'Camera-only mode; ARM is not configured'
             try:
-                with self.lock:
-                    if not self.initialized:
-                        self.baseline()
-                    self.tick()
-                    self.status = 'Connected; monitoring the configured drive'
                 self.prune_evidence()
             except Exception as exc:
-                self.status = str(exc)
-                # Recognition captured during a polling outage cannot identify a new insertion reliably.
-                self.db.invalidate_pending()
-                self.initialized = False
-            self.stop.wait(3)
+                self.status = 'Evidence cleanup failed: '+str(exc)
+            return
+        try:
+            with self.lock:
+                if not self.initialized:
+                    self.baseline()
+                self.tick()
+                self.status = 'Connected; monitoring the configured drive'
+            self.prune_evidence()
+        except Exception as exc:
+            self.status = str(exc)
+            # Recognition captured during a polling outage cannot identify a new insertion reliably.
+            self.db.invalidate_pending()
+            self.initialized = False
 
     def tick(self):
         self.db.execute("UPDATE events SET status='expired' WHERE job IS NULL AND created<? AND status IN ('processing','ready','review')",(time.time()-self.s.ttl,))
@@ -371,3 +385,4 @@ class Controller:
                 'masters':[m.model_dump() for m in self.masters()], 'events':events,'batches':batches,
                 'reservations':reservations,'skipped':self.db.rows('SELECT * FROM skipped'),
                 'preflight':self.db.get('preflight')}
+

@@ -12,3 +12,11 @@
 - Initial masterlist-driven controller skeleton.
 - ARM API adapter, global hold, polling, queue state, Docker deployment, SQLite/Alembic, and v2 vision interface.
 
+
+# Camera-only OCR fix
+
+- Leave camera captures intact when ARM_URL is empty, instead of treating setup mode as an ARM outage.
+- Retain late OCR results for inspection without restoring invalidated or expired insertion eligibility.
+- Show detected text directly, including uncertain words for display only. Automatic matching still requires high-confidence text and an approved masterlist.
+- Add regression coverage for camera-only polling, late results and uncertain-word separation.
+
