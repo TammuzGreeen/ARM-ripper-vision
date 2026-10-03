@@ -2,6 +2,12 @@
 
 A Docker companion for ARM Neu with local USB-camera recognition and user-maintained season masterlists.
 
+Optional [Qwen image handoff](arm-season-queue/docs/vision-handoff.md) sends selected
+captures to your configured llama.cpp/Ollama/image API and displays printed identity
+fields for review. Menu capture, subtitle analysis and fingerprint lookup have
+explicit future-extension stubs; they do not run yet. No reference-photo library
+is required, and model observations never modify masterlists or authorize ripping.
+
 **You supply and supplement the masterlist.** The camera adds confidence about the presented medium’s identity and printed contents by checking them against that list. It never creates, supplements or rewrites masterlist entries. Conflicts or uncertain recognition require review.
 
 ## Current implementation
@@ -62,3 +68,4 @@ python -m unittest discover -s tests -v
 FFmpeg/ffprobe enable the real local generated-media test. The Docker image also installs Tesseract and ZBar. CI retains the legacy tests and adds the companion suite. See [formats](arm-season-queue/docs/formats.md), [camera setup](arm-season-queue/docs/camera.md), and [FileFlows contract](arm-season-queue/docs/fileflows.md).
 
 License: [MIT](LICENSE).
+

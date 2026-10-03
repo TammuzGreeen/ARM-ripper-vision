@@ -29,6 +29,12 @@ services:
       CAMERA_WIDTH: "1920"
       CAMERA_HEIGHT: "1080"
       CAMERA_FPS: "15"
+      # Opt in to sending captured images to your own vision server.
+      RECOGNITION_BACKEND: tesseract
+      VISION_BASE_URL: ""
+      VISION_MODEL: ""
+      VISION_API_KEY: ""
+      VISION_TIMEOUT_SECONDS: "180"
       OCR_LANG: deu+eng
       TZ: Europe/Berlin
     volumes:

@@ -8,6 +8,8 @@ The adapter currently targets inspected ARM Neu **19.1.0**, reference commit `f6
 
 ## What v1 does
 
+- Optional [Qwen vision handoff](docs/vision-handoff.md) for webcam/uploaded images, with structured printed series/season/episode observations. Configurable llama.cpp, Ollama or compatible image API; review-only in this iteration. No reference photos required.
+
 - Manual camera testing with explicit **View is empty** and **Capture disc now** controls. Repeat snapshots without restarting; test evidence never authorizes ripping. See [camera controls](docs/camera.md).
 
 - Linux V4L2 USB camera capture, cropped live MJPEG preview, camera status, stable/sharp three-frame capture, local Tesseract German/English OCR, four rotations, local contrast enhancement and optional ZBar barcodes.

@@ -1,5 +1,14 @@
 # Changelog
 
+## Optional Qwen image handoff
+
+- Add opt-in llama.cpp, Ollama and compatible vision API backends for selected webcam/uploaded images.
+- Display schema-validated printed series, season, disc, edition and episode observations with source-image references; missing information stays unknown.
+- Keep vision results review-only, separate from insertion pairing, ripping permission and user-maintained masterlists.
+- Preserve image evidence on failures; sanitize network errors and reject malformed, incomplete or oversized model output.
+- Add explicit menu capture, subtitle analysis and structural-fingerprint lookup stubs; no reference-photo matching or subtitle processing.
+- Document fingerprint-first future identification with menu analysis for unknown discs.
+
 ## Manual camera testing
 
 - Add explicit empty-view confirmation and one-frame manual capture; repeat captures without removal detection or container restarts.

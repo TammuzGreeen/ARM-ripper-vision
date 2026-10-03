@@ -22,6 +22,11 @@ class Settings:
     roi: str = os.getenv('CAMERA_ROI', '0.15,0.1,0.85,0.9')
     sharpness: float = float(os.getenv('CAMERA_SHARPNESS', '100'))
     ocr_lang: str = os.getenv('OCR_LANG', 'deu+eng')
+    recognition_backend: str = os.getenv('RECOGNITION_BACKEND', 'tesseract')
+    vision_url: str = os.getenv('VISION_BASE_URL', '').rstrip('/')
+    vision_model: str = os.getenv('VISION_MODEL', '')
+    vision_key: str = os.getenv('VISION_API_KEY', '')
+    vision_timeout: int = int(os.getenv('VISION_TIMEOUT_SECONDS', '180'))
     ttl: int = int(os.getenv('CAPTURE_TTL_SECONDS', '180'))
     retention: int = int(os.getenv('EVIDENCE_RETENTION_DAYS', '30'))
     drive: str = os.getenv('ARM_DRIVE', '/dev/sr0')
@@ -30,6 +35,16 @@ class Settings:
     switch_policy: str = os.getenv('BATCH_SWITCH_POLICY', 'review')
 
     def __post_init__(self):
+        if self.recognition_backend not in ('tesseract', 'ollama', 'llamacpp', 'openai-compatible'):
+            raise ValueError('RECOGNITION_BACKEND must be tesseract, ollama, llamacpp or openai-compatible')
+        if not 10 <= self.vision_timeout <= 600:
+            raise ValueError('VISION_TIMEOUT_SECONDS must be between 10 and 600')
+        if self.recognition_backend != 'tesseract':
+            parsed = urlsplit(self.vision_url)
+            if parsed.scheme not in ('http', 'https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError('Set VISION_BASE_URL to an HTTP(S) API base without embedded credentials')
+            if not self.vision_model.strip():
+                raise ValueError('Set VISION_MODEL to the exact image-capable model ID served by your server')
         if self.camera_mode not in ('', 'manual', 'auto'):
             raise ValueError('CAMERA_MODE must be manual or auto')
         if self.arm_url:

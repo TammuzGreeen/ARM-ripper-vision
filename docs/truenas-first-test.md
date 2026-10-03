@@ -61,6 +61,10 @@ ARM-not-configured and unmatched recognition are expected. The first port in
 `8099:8080` is configurable.
 
 ## Later ARM connection
+
+For optional local Qwen recognition, see [vision handoff](../arm-season-queue/docs/vision-handoff.md).
+It uses environment settings and sends selected images only to your configured server.
+Its first iteration is review-only and does not authorize ARM jobs.
 Leave ARM_URL empty for the first camera test. Before ripping, identify the
 deployed ARM version/source and follow the
 [compatibility guide](../arm-season-queue/docs/compatibility.md). Do not copy a

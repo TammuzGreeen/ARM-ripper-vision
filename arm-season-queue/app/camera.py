@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 
 from .recognition import consensus, ocr
+from .vision import identify, VisionError
 
 
 class PresentationGate:
@@ -55,7 +56,14 @@ class Camera:
 
     def snapshot(self):
         with self.lock:
-            return dict(self.status, busy=bool(self.future and not self.future.done()))
+            return dict(self.status, busy=bool(self.future and not self.future.done()), backend=self.s.recognition_backend)
+
+    def begin(self, source):
+        return self.on_begin('vision_test' if self.s.recognition_backend != 'tesseract' else source)
+
+    def release(self, event):
+        if self.s.recognition_backend == 'tesseract':
+            self.on_release(event)
 
     def require_frame(self):
         if self.frame is None or not self.status['connected'] or time.monotonic()-self.frame_at > 2:
@@ -86,8 +94,8 @@ class Camera:
                 raise ValueError('Recognition is busy; wait before capturing again')
             # Freeze the current frame at the click, never a later empty scene.
             image = self.frame.copy()
-            event = self.on_begin('manual_test')
-            self.status['message'] = 'Reading your snapshot locally; you may move the disc now'
+            event = self.begin('manual_test')
+            self.status['message'] = 'Reading your snapshot; you may move the disc now'
             # Test snapshots are never released for association with an ARM insertion.
             self.future = self.pool.submit(self.process, event, [image], True)
             return event
@@ -163,14 +171,14 @@ class Camera:
                         stable = self.previous is not None and np.mean(np.abs(small-self.previous)) < 4
                         if present and self.event is None:
                             # Invalidate previous evidence on object arrival, even if blurry/unreadable.
-                            self.event = self.on_begin('camera')
+                            self.event = self.begin('camera')
                             self.samples = []
                             self.collecting = False
                             self.submitted = False
                         action = self.gate.observe(present, stable, sharp>=self.s.sharpness and glare<.55)
                         # Release also needs to work for an object that never became sharp enough.
                         if not present and self.gate.empty>=8 and self.event:
-                            self.on_release(self.event)
+                            self.release(self.event)
                             if not getattr(self,'submitted',False):
                                 self.on_result(self.event, {'accepted':False,'frames':[], 'reason':'Media removed before enough sharp frames were captured'})
                                 self.samples = []
@@ -190,7 +198,7 @@ class Camera:
                                 self.collecting = False
                                 self.submitted = True
                                 self.future = self.pool.submit(self.process, self.event, images)
-                                self.status['message'] = 'Reading 3 frames locally; remove media before insertion'
+                                self.status['message'] = 'Reading 3 captured frames; remove media before insertion'
                     self.previous = small
                 self.stop.wait(.15)
             except Exception as exc:
@@ -210,27 +218,40 @@ class Camera:
         if cap:
             cap.release()
 
-    def process(self, event, images, test_only=False):
+    def process(self, event, images, test_only=False, source='webcam'):
+        results = []
+        vision = self.s.recognition_backend != 'tesseract'
         try:
             evidence = self.s.state/'evidence'/event
             evidence.mkdir(parents=True, exist_ok=True)
-            results = []
             for i, frame in enumerate(images):
                 path = evidence/f'{i}.jpg'
                 if not cv2.imwrite(str(path), frame):
                     raise RuntimeError('Could not retain camera evidence')
-                result = ocr(frame, self.s.ocr_lang)
-                result['evidence'] = f'{event}/{i}.jpg'
-                results.append(result)
-            result = consensus(results)
-            if test_only:
+                # Retain evidence before recognition, including on server failure.
+                results.append({'evidence':f'{event}/{i}.jpg'})
+            if vision:
+                observation = identify(self.s, images, source=source)
+                result = {'accepted':False, 'test_only':True, 'frames':results,
+                          'backend':self.s.recognition_backend, 'model':self.s.vision_model,
+                          'observation':observation,
+                          'reason':'Vision observations require review; this first iteration does not authorize ripping.'}
+            else:
+                for item, frame in zip(results, images):
+                    item.update(ocr(frame, self.s.ocr_lang))
+                result = consensus(results)
+            if test_only and not vision:
                 result.update(accepted=False, test_only=True,
                               reason='Manual test snapshot: inspect the image and text below. Not used for ripping.')
             self.on_result(event, result)
             with self.lock:
                 self.status['message'] = result['reason']
         except Exception as exc:
-            self.on_result(event, {'accepted':False, 'frames':[], 'reason':'Local OCR failed: '+str(exc)})
+            reason = str(exc) if isinstance(exc, VisionError) else 'Image recognition failed; check service configuration and try again'
+            self.on_result(event, {'accepted':False, 'test_only':test_only or vision,
+                                  'frames':results, 'reason':reason, 'backend':self.s.recognition_backend})
+            with self.lock:
+                self.status['message'] = reason
 
     def upload(self, content):
         if self.future and not self.future.done():
@@ -245,9 +266,9 @@ class Camera:
         frame = cv2.imdecode(np.frombuffer(content,dtype=np.uint8),cv2.IMREAD_COLOR)
         if frame is None:
             raise ValueError('Unsupported image')
-        event = self.on_begin('upload')
-        self.on_release(event)
+        event = self.begin('upload')
+        self.release(event)
         # One uploaded image cannot masquerade as independent camera consensus.
-        self.future = self.pool.submit(self.process,event,[frame])
+        self.future = self.pool.submit(self.process,event,[frame],False,'photo')
         return event
 
