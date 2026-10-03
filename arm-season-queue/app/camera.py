@@ -44,12 +44,53 @@ class Camera:
         self.future = None
         self.preview = None
         self.frame = None
+        self.frame_at = 0
+        self.mode = settings.camera_mode or ('auto' if settings.arm_url else 'manual')
         self.background = None
         self.previous = None
         self.gate = PresentationGate()
         self.event = None
         self.samples = []
-        self.status = {'connected':False, 'message':'Connecting to camera', 'calibrated':False}
+        self.status = {'connected':False, 'message':'Connecting to camera', 'calibrated':False, 'mode':self.mode}
+
+    def snapshot(self):
+        with self.lock:
+            return dict(self.status, busy=bool(self.future and not self.future.done()))
+
+    def require_frame(self):
+        if self.frame is None or not self.status['connected'] or time.monotonic()-self.frame_at > 2:
+            raise ValueError('No fresh camera frame available; check the live preview')
+
+    def set_mode(self, mode):
+        if mode not in ('manual', 'auto'):
+            raise ValueError('Choose manual or auto camera mode')
+        with self.lock:
+            if self.future and not self.future.done():
+                raise ValueError('Wait for recognition to finish before changing mode')
+            self.mode = mode
+            self.event = None
+            self.samples = []
+            self.background = None
+            self.previous = None
+            self.gate = PresentationGate()
+            self.status.update(mode=mode, calibrated=False, message='Clear the view, then mark it empty')
+
+    def capture_manual(self):
+        with self.lock:
+            if self.mode != 'manual':
+                raise ValueError('Select Manual test mode first')
+            self.require_frame()
+            if self.background is None:
+                raise ValueError('Clear the view and click View is empty first')
+            if self.future and not self.future.done():
+                raise ValueError('Recognition is busy; wait before capturing again')
+            # Freeze the current frame at the click, never a later empty scene.
+            image = self.frame.copy()
+            event = self.on_begin('manual_test')
+            self.status['message'] = 'Reading your snapshot locally; you may move the disc now'
+            # Test snapshots are never released for association with an ARM insertion.
+            self.future = self.pool.submit(self.process, event, [image], True)
+            return event
 
     def start(self):
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -62,14 +103,18 @@ class Camera:
 
     def calibrate(self):
         with self.lock:
-            if self.frame is None:
-                raise ValueError('No camera frame available')
-            if self.event or self.samples or (self.future and not self.future.done()):
-                raise ValueError('Remove the media and finish recognition before recalibrating')
+            self.require_frame()
+            if self.future and not self.future.done():
+                raise ValueError('Wait for recognition to finish before marking the view empty')
+            # Explicit empty confirmation recovers even if automatic detection is latched.
+            self.event = None
+            self.samples = []
+            self.previous = None
             self.background = self.small(self.frame)
             self.gate = PresentationGate()
             self.status['calibrated'] = True
-            self.status['message'] = 'Ready: present media inside the preview'
+            self.status['message'] = ('Empty view saved. Place the disc, then click Capture disc now'
+                                      if self.mode == 'manual' else 'Ready: present media inside the preview')
 
     @staticmethod
     def small(frame):
@@ -77,6 +122,8 @@ class Camera:
 
     def recapture(self):
         with self.lock:
+            if self.mode == 'manual':
+                raise ValueError('Use Capture disc now in Manual test mode')
             if self.event or (self.future and not self.future.done()):
                 raise ValueError('Remove media and wait for current recognition first')
             self.gate = PresentationGate()
@@ -101,6 +148,7 @@ class Camera:
                 frame = frame[int(h*y1):int(h*y2), int(w*x1):int(w*x2)]
                 with self.lock:
                     self.frame = frame
+                    self.frame_at = time.monotonic()
                     self.status.update(connected=True, resolution=f'{w}×{h}')
                     preview_height = max(1,round(960*frame.shape[0]/frame.shape[1]))
                     self.preview = cv2.imencode('.jpg', cv2.resize(frame,(960,preview_height)), [cv2.IMWRITE_JPEG_QUALITY,75])[1].tobytes()
@@ -110,7 +158,7 @@ class Camera:
                     self.status.update(sharpness=round(sharp), glare=round(glare,2))
                     if self.background is None:
                         self.status['message'] = 'Clear the view, then calibrate the empty background'
-                    else:
+                    elif self.mode == 'auto':
                         present = np.mean(np.abs(small-self.background)>25) > .12
                         stable = self.previous is not None and np.mean(np.abs(small-self.previous)) < 4
                         if present and self.event is None:
@@ -162,7 +210,7 @@ class Camera:
         if cap:
             cap.release()
 
-    def process(self, event, images):
+    def process(self, event, images, test_only=False):
         try:
             evidence = self.s.state/'evidence'/event
             evidence.mkdir(parents=True, exist_ok=True)
@@ -175,6 +223,9 @@ class Camera:
                 result['evidence'] = f'{event}/{i}.jpg'
                 results.append(result)
             result = consensus(results)
+            if test_only:
+                result.update(accepted=False, test_only=True,
+                              reason='Manual test snapshot: inspect the image and text below. Not used for ripping.')
             self.on_result(event, result)
             with self.lock:
                 self.status['message'] = result['reason']
@@ -199,3 +250,4 @@ class Camera:
         # One uploaded image cannot masquerade as independent camera consensus.
         self.future = self.pool.submit(self.process,event,[frame])
         return event
+

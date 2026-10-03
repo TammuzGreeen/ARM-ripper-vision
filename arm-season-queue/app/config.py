@@ -15,6 +15,7 @@ class Settings:
     source_verified: str = os.getenv('ARM_VERIFIED_SOURCE_SHA', '')
     expected_version: str = os.getenv('ARM_EXPECTED_VERSION', '19.1.0')
     camera: str = os.getenv('CAMERA_DEVICE', '/dev/video0')
+    camera_mode: str = os.getenv('CAMERA_MODE', '')
     width: int = int(os.getenv('CAMERA_WIDTH', '3840'))
     height: int = int(os.getenv('CAMERA_HEIGHT', '2160'))
     camera_fps: int = int(os.getenv('CAMERA_FPS', '15'))
@@ -29,6 +30,8 @@ class Settings:
     switch_policy: str = os.getenv('BATCH_SWITCH_POLICY', 'review')
 
     def __post_init__(self):
+        if self.camera_mode not in ('', 'manual', 'auto'):
+            raise ValueError('CAMERA_MODE must be manual or auto')
         if self.arm_url:
             parsed = urlsplit(self.arm_url)
             if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -38,3 +41,4 @@ class Settings:
 
 
 REFERENCE_SHA = 'f6ec2e3fd47cf951e89094e0a9d6999ab94d781f'
+

@@ -8,6 +8,8 @@ The adapter currently targets inspected ARM Neu **19.1.0**, reference commit `f6
 
 ## What v1 does
 
+- Manual camera testing with explicit **View is empty** and **Capture disc now** controls. Repeat snapshots without restarting; test evidence never authorizes ripping. See [camera controls](docs/camera.md).
+
 - Linux V4L2 USB camera capture, cropped live MJPEG preview, camera status, stable/sharp three-frame capture, local Tesseract German/English OCR, four rotations, local contrast enhancement and optional ZBar barcodes.
 - Recognition extraction before matching. Multiple frames must agree on printed season/disc numbers and a unique approved title/edition. Unreadable, conflicting, unrelated or ambiguous evidence opens a concise review.
 - User-maintained versioned JSON/YAML masterlists, manual import/editing and approval, explicit MakeMKV/DVD-title/ARM-track separation, out-of-order discs and separate editions.
@@ -95,3 +97,4 @@ Python 3.12, `pip install -r requirements.txt`, then `python -m unittest discove
 Stop with `docker compose down` (without deleting volumes). Retain state and handover manifests for recovery. Restore only the ARM settings you deliberately changed, while idle; remove global pause only when you intend ARM to return to its ordinary behavior. Rollback does not delete camera evidence, staging media or library files. Keep evidence until successful publication has been checked. Unreferenced evidence expires after the configured retention period; reservations and imported-masterlist provenance protect their evidence indefinitely.
 
 The Python dependency closure is pinned in `requirements.txt`; direct requirements are in `requirements.in`. The base image has a specific version tag. Debian OCR/media packages are resolved during image build, so record the built image digest and `dpkg-query -W` output when qualifying a deployment; the entire OS image is not claimed to be bit-reproducible.
+

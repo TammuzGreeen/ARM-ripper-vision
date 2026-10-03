@@ -17,6 +17,26 @@ Set the host path in `CAMERA_HOST_DEVICE`; Compose maps it to `/dev/video0` in t
 
 ## Positioning and capture
 
+For testing, select **Manual test** in the web UI. Clear the scene and click
+**View is empty**; this saves a background without running OCR. Place the disc,
+wait for focus and click **Capture disc now**. This freezes one frame at the click.
+Inspect the retained image before reading the OCR text. When recognition finishes,
+capture again or swap discs and capture again without restarting the container.
+Manual mode never triggers OCR from changes in the preview. Its snapshots cannot
+pair with insertions or authorize ripping, and never change the masterlist.
+
+Set `CAMERA_MODE=manual` or `auto` to select a startup mode. When omitted, an empty
+`ARM_URL` defaults to manual; a configured ARM URL defaults to auto. Web UI mode
+changes last until restart, invalidate unused evidence and require a new empty
+baseline. Disconnected/stale frames and simultaneous captures are rejected.
+
+In **Automatic** mode, if detection gets stuck after OCR finishes, clear the
+actual view and click **Reset empty view**. This resets detection and invalidates
+unused evidence without restarting or running OCR on the empty scene.
+
+Manual tests retain one cropped JPEG per snapshot; automatic events retain three.
+The description below applies to automatic detection.
+
 Place the camera above a matte, contrasting, stationary surface. Keep the camera's view on the disc or packaging. Use diffuse side lighting; printed discs are reflective. Avoid aiming a lamp directly along the lens axis. Keep text large enough to read; for tiny labels, move the camera closer rather than expecting software to reconstruct missing detail. Autofocus must settle before capture. Capture detection uses a calibrated empty background, so changing lighting or moving the camera calls for recalibration.
 
 `CAMERA_ROI=x1,y1,x2,y2` is a fractional crop of the incoming image, default `0.15,0.1,0.85,0.9`. Both preview and retained evidence use this crop. The default sharpness threshold is a Laplacian variance of 100; tune it with real frames, as it is camera/resolution-dependent. Background difference locates a newly presented object; image stability, sharpness and coarse glare checks gate three successive frames. This detector is not semantic disc classification: identification comes from visible text/barcodes.
@@ -32,3 +52,4 @@ This handles quarter-turn rotation and moderate contrast problems, not arbitrary
 There is no cloud provider enabled or implemented in v1. Local-first operation avoids uploads, credentials and per-image costs, but has weaker understanding of difficult layouts than some cloud vision models. If a future cloud backend is needed, it must be explicit, configurable and require agreement before any image upload. Never put provider keys in masterlists or source files.
 
 The service stores three selected cropped JPEGs per camera event plus structured OCR results, never continuous video. Unreferenced evidence expires after `EVIDENCE_RETENTION_DAYS` (30 default); evidence referenced by reservations or masterlist provenance is protected. Retained OCR and identifiers stay in local SQLite. Preview/evidence require the same authentication as the interface.
+

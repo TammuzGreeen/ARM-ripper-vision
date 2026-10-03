@@ -90,7 +90,7 @@ def create_app(settings=None, start_workers=True):
 
     @app.get('/api/state')
     def state():
-        return dict(controller.snapshot(),camera=camera.status)
+        return dict(controller.snapshot(),camera=camera.snapshot())
 
     @app.post('/api/preflight')
     def preflight():
@@ -122,14 +122,29 @@ def create_app(settings=None, start_workers=True):
 
     @app.post('/api/camera/calibrate')
     def calibrate():
-        camera.calibrate()
+        with camera.lock:
+            camera.calibrate()
+            controller.db.invalidate_pending()
         return {'ok':True}
 
     @app.post('/api/camera/recapture')
     def recapture():
-        controller.db.invalidate_pending()
-        camera.recapture()
+        with camera.lock:
+            camera.recapture()
+            controller.db.invalidate_pending()
         return {'ok':True}
+
+    @app.post('/api/camera/mode')
+    async def camera_mode(request:Request):
+        body = json.loads(await limited(request))
+        with camera.lock:
+            camera.set_mode(body.get('mode'))
+            controller.db.invalidate_pending()
+        return {'ok':True}
+
+    @app.post('/api/camera/capture')
+    def capture():
+        return {'event':camera.capture_manual()}
 
     @app.get('/api/camera/preview')
     async def preview():
@@ -171,3 +186,4 @@ def run():
 
 if __name__=='__main__':
     run()
+

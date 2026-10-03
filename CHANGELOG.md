@@ -1,5 +1,14 @@
 # Changelog
 
+## Manual camera testing
+
+- Add explicit empty-view confirmation and one-frame manual capture; repeat captures without removal detection or container restarts.
+- Default camera-only startup to manual testing; allow CAMERA_MODE and a runtime mode selector.
+- Keep test snapshots separate from insertion pairing and ripping approval; reject stale/disconnected frames.
+- Allow explicit empty-view reset to recover a stuck automatic detector. Failed recapture requests no longer invalidate evidence.
+- Show retained images before a bounded OCR preview, with full diagnostic output in expandable details.
+- Add nine regression tests for repeat capture, isolation, mode changes, stale frames and endpoint authentication.
+
 ## Camera companion integration (0.1.1)
 
 - Make the prepared local USB-camera/OCR companion the default Docker runtime, retaining the previous helper under its existing package for reference/migration.

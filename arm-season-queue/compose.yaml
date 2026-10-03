@@ -26,6 +26,7 @@ services:
       QUEUE_USER: ${QUEUE_USER:-operator}
       QUEUE_PASSWORD: ${QUEUE_PASSWORD:?Set a private queue password}
       CAMERA_DEVICE: /dev/video0
+      CAMERA_MODE: ${CAMERA_MODE:-}
       CAMERA_WIDTH: ${CAMERA_WIDTH:-3840}
       CAMERA_HEIGHT: ${CAMERA_HEIGHT:-2160}
       CAMERA_FPS: ${CAMERA_FPS:-15}
@@ -55,3 +56,4 @@ services:
       - ${LIBRARY_HOST:-/mnt/POOL/media/library}:/library
     entrypoint: [python, -m, app.publish]
     command: [--help]
+

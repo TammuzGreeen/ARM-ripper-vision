@@ -116,6 +116,8 @@ class Controller:
                 if not row or row['status'] not in ('ready','review'):
                     raise ValueError('This event cannot be reviewed; capture again')
                 body = json.loads(row['body'])
+                if body.get('source') == 'manual_test' or body.get('result',{}).get('test_only'):
+                    raise ValueError('Manual test snapshots cannot authorize ripping; make a fresh automatic capture')
                 if not body.get('result',{}).get('frames'):
                     raise ValueError('No retained frame available; recapture')
                 target = job if job is not None else row['job']

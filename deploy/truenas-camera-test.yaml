@@ -1,9 +1,9 @@
 # TrueNAS Install via YAML. Replace password, camera path/GID and POOL paths.
-# Pull the private GHCR image first; see docs/truenas-first-test.md.
+# Public GHCR image; no registry token required. See docs/truenas-first-test.md.
 services:
   queue:
     image: ghcr.io/tammuzgreeen/arm-season-queue:main
-    pull_policy: never
+    pull_policy: always
     restart: unless-stopped
     user: "568:568"
     group_add:
@@ -25,6 +25,7 @@ services:
       ARM_MEDIA_PREFIX: /home/arm/media
       CAMERA_DEVICE: /dev/video0
       # Initial request, not a claim of this camera's supported capture modes.
+      CAMERA_MODE: manual
       CAMERA_WIDTH: "1920"
       CAMERA_HEIGHT: "1080"
       CAMERA_FPS: "15"
@@ -39,3 +40,4 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
     tmpfs: ["/tmp:size=512m,mode=1777"]
+

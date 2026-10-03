@@ -44,10 +44,21 @@ guided Custom App installer; grant user 568 write access. Compose named volumes
 are Docker-managed volumes, not the wizard's ixVolumes. A handover directory must
 be accessible to the separate FileFlows worker when that integration is enabled.
 
-The template expects the image to be pre-pulled (`pull_policy: never`).
-Open `http://NAS_IP:8099`, log in as `operator`, calibrate the empty scene and
-present a label. No masterlist is needed for preview/OCR. ARM-not-configured and
-unmatched recognition are expected. The first port in `8099:8080` is configurable.
+The template pulls the public image (`pull_policy: always`). For a specific build,
+replace `main` with its `sha-<full commit SHA>` tag.
+Open `http://NAS_IP:8099`, log in as `operator`, and use **Manual test** mode:
+
+1. Remove the disc and click **View is empty**. This saves the background without OCR.
+2. Place the disc, wait for focus, and click **Capture disc now**.
+3. Inspect the retained image and OCR preview. After OCR finishes, capture again
+   or swap discs and capture again. No container restart is needed between tests.
+
+Set `CAMERA_MODE=manual` in the GUI to keep this mode across restarts. If omitted,
+an empty `ARM_URL` defaults to manual; a configured ARM URL defaults to automatic.
+The web UI mode selector lasts until restart and requires a new empty baseline.
+Manual snapshots cannot authorize ripping. No masterlist is needed for preview/OCR.
+ARM-not-configured and unmatched recognition are expected. The first port in
+`8099:8080` is configurable.
 
 ## Later ARM connection
 Leave ARM_URL empty for the first camera test. Before ripping, identify the
@@ -72,3 +83,4 @@ your own private deployment notes, not in contributions to this repository.
 
 References: [GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry),
 [TrueNAS custom apps](https://apps.truenas.com/managing-apps/installing-custom-apps/).
+
