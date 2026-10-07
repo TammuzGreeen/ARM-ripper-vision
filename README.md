@@ -49,6 +49,8 @@ Supply and approve your masterlist → select a season → present its disc to t
 
 [DS9 example](arm-season-queue/examples/ds9-season-2-part-1.yaml): Disc 1 mappings use the explicitly supplied evidence. Disc 2/3 source mappings remain unresolved. Photos cannot invent MakeMKV/DVD-title or angle mappings.
 
+[Borgia and Voyager masterlist drafts](arm-season-queue/examples/masterlist-drafts/README.md) provide ten season examples with edition and numbering notes. They are **unapproved and not import-ready**: technical disc scans and review are still required.
+
 ## Verification and limits
 
 32 companion tests pass, including a generated-media validation/copy/acknowledgement round trip. GitHub Actions builds and smoke-tests the container before publishing. **Physical webcam OCR, real ARM ripping and deployed FileFlows integration have not been qualified.** No direct TrueNAS access was used. No mock ARM service was built. See the [test report](arm-season-queue/docs/live-test-report.md).

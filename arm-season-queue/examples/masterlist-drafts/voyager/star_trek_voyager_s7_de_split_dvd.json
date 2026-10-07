@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "id": "star_trek_voyager_s7_de_split_dvd",
+  "series": "Star Trek: Voyager",
+  "season": 7,
+  "edition": "de_split_season_dvd",
+  "edition_name": "German DVD split-season release, Season 7 Part 1 / Part 2",
+  "title_aliases": [
+    "Star Trek – Raumschiff Voyager",
+    "Star Trek Voyager"
+  ],
+  "edition_tokens": [
+    "star_trek_voyager",
+    "season_7",
+    "german_dvd",
+    "split_season_release"
+  ],
+  "approved": false,
+  "provenance": [
+    "PHOTO EVIDENCE: contributor-supplied photographs; originals retained privately and not included in this repository.",
+    "ONLINE: STAR TREK DE split-season product pages, startrek.de (release-specific disc/episode order).",
+    "ONLINE: Fernsehserien.de Star Trek – Raumschiff Voyager episode guide (season/library numbering).",
+    "ONLINE: https://www.startrek.de/produkte/details/1211",
+    "ONLINE: https://www.startrek.de/produkte/details/1209",
+    "ONLINE: https://www.fernsehserien.de/star-trek-raumschiff-voyager/episodenguide/staffel-7/945",
+    "ONLINE: https://www.fernsehserien.de/star-trek-raumschiff-voyager/episodenguide/staffel-7/945/2"
+  ],
+  "unresolved": [
+    "Disc-to-episode placement is based on supplied physical insert photographs and checked release-specific online listings.",
+    "Library numbering is kept distinct from printed physical numbering where they differ.",
+    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred.",
+    "Physical DVD order and library order differ for Zersplittert / Abstammung; both are preserved using printed vs number.",
+    "The finale is printed as one combined title covering episodes 25-26; no MakeMKV/DVD-title split is inferred."
+  ],
+  "discs": [
+    {
+      "id": "voyager_s7_d1",
+      "number": 1,
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "Unimatrix Zero, Teil II"
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Unvollkommenheit"
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Das Rennen"
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Verdrängung"
+        }
+      ],
+      "labels": [
+        "DISC 1: EPISODEN 1-4"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s7_d2",
+      "number": 2,
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "Kritische Versorgung"
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Eingeschleust"
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Körper & Seele"
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Nightingale"
+        }
+      ],
+      "labels": [
+        "DISC 2: EPISODEN 5-8"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s7_d3",
+      "number": 3,
+      "episodes": [
+        {
+          "printed": "9",
+          "number": 9,
+          "title": "Fleisch & Blut, Teil I"
+        },
+        {
+          "printed": "10",
+          "number": 10,
+          "title": "Fleisch & Blut, Teil II"
+        },
+        {
+          "printed": "11",
+          "number": 12,
+          "title": "Zersplittert",
+          "numbering_note": "Physical DVD order places Zersplittert at printed episode 11; Fernsehserien.de library order identifies it as season episode 12."
+        },
+        {
+          "printed": "12",
+          "number": 11,
+          "title": "Abstammung",
+          "numbering_note": "Physical DVD order places Abstammung at printed episode 12; Fernsehserien.de library order identifies it as season episode 11."
+        }
+      ],
+      "labels": [
+        "DISC 3: EPISODEN 9-12"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s7_d4",
+      "number": 4,
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Reue"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "Die Prophezeiung"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Die Leere"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Die Arbeiterschaft, Teil I"
+        }
+      ],
+      "labels": [
+        "DISC 4: EPISODEN 13-16"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s7_d5",
+      "number": 5,
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Die Arbeiterschaft, Teil II"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "Menschliche Fehler"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Q2"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Die Veröffentlichung"
+        }
+      ],
+      "labels": [
+        "DISC 5: EPISODEN 17-20"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s7_d6",
+      "number": 6,
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Friendship One"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Ein natürliches Gesetz"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Eine Heimstätte"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "Renaissance Mensch"
+        }
+      ],
+      "labels": [
+        "DISC 6: EPISODEN 21-24"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s7_d7",
+      "number": 7,
+      "episodes": [
+        {
+          "printed": "25-26",
+          "number": 25,
+          "title": "Endspiel Teil I & II",
+          "end": 26,
+          "numbering_note": "The physical release prints EPISODEN 25-26 with a single combined title. Library sources list Endspiel (1) and Endspiel (2) separately; no technical split is inferred."
+        }
+      ],
+      "labels": [
+        "DISC 7: EPISODEN 25-26"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    }
+  ]
+}

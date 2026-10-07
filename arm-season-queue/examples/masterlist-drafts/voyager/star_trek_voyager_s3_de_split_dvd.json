@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "id": "star_trek_voyager_s3_de_split_dvd",
+  "series": "Star Trek: Voyager",
+  "season": 3,
+  "edition": "de_split_season_dvd",
+  "edition_name": "German DVD split-season release, Season 3 Part 1 / Part 2",
+  "title_aliases": [
+    "Star Trek – Raumschiff Voyager",
+    "Star Trek Voyager"
+  ],
+  "edition_tokens": [
+    "star_trek_voyager",
+    "season_3",
+    "german_dvd",
+    "split_season_release"
+  ],
+  "approved": false,
+  "provenance": [
+    "PHOTO EVIDENCE: contributor-supplied photographs; originals retained privately and not included in this repository.",
+    "ONLINE: STAR TREK DE split-season product pages, startrek.de (release-specific disc/episode order).",
+    "ONLINE: Fernsehserien.de Star Trek – Raumschiff Voyager episode guide (season/library numbering).",
+    "ONLINE: https://www.startrek.de/produkte/details/1124",
+    "ONLINE: https://www.startrek.de/produkte/details/1125",
+    "ONLINE: https://www.fernsehserien.de/star-trek-raumschiff-voyager/episodenguide/staffel-3/945"
+  ],
+  "unresolved": [
+    "Disc-to-episode placement is based on supplied physical insert photographs and checked release-specific online listings.",
+    "Library numbering is kept distinct from printed physical numbering where they differ.",
+    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+  ],
+  "discs": [
+    {
+      "id": "voyager_s3_d1",
+      "number": 1,
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "Der Kampf ums Dasein, Teil II"
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Tuvoks Flashback"
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Das Hochsicherheitsgefängnis"
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Der Schwarm"
+        }
+      ],
+      "labels": [
+        "DISC 1: EPISODEN 1-4"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s3_d2",
+      "number": 2,
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "Das Wurmloch"
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Das Erinnern"
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Das Ritual"
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Vor dem Ende der Zukunft, Teil I"
+        }
+      ],
+      "labels": [
+        "DISC 2: EPISODEN 5-8"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s3_d3",
+      "number": 3,
+      "episodes": [
+        {
+          "printed": "9",
+          "number": 9,
+          "title": "Vor dem Ende der Zukunft, Teil II"
+        },
+        {
+          "printed": "10",
+          "number": 10,
+          "title": "Der Kriegsherr"
+        },
+        {
+          "printed": "11",
+          "number": 11,
+          "title": "Die „Q“-Krise"
+        },
+        {
+          "printed": "12",
+          "number": 12,
+          "title": "Makrokosmos"
+        }
+      ],
+      "labels": [
+        "DISC 3: EPISODEN 9-12"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s3_d4",
+      "number": 4,
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Das Wagnis"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "Das andere Ego"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Der Wille"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Pon Farr"
+        }
+      ],
+      "labels": [
+        "DISC 4: EPISODEN 13-16"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s3_d5",
+      "number": 5,
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Die Kooperative"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "Charakterelemente"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Die Asteroiden"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Die neue Identität"
+        }
+      ],
+      "labels": [
+        "DISC 5: EPISODEN 17-20"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s3_d6",
+      "number": 6,
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Temporale Sprünge"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Das wahre Leben"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Herkunft aus der Ferne"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "Translokalisation"
+        }
+      ],
+      "labels": [
+        "DISC 6: EPISODEN 21-24"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s3_d7",
+      "number": 7,
+      "episodes": [
+        {
+          "printed": "25",
+          "number": 25,
+          "title": "Rebellion Alpha"
+        },
+        {
+          "printed": "26",
+          "number": 26,
+          "title": "Skorpion, Teil I"
+        }
+      ],
+      "labels": [
+        "DISC 7: EPISODEN 25-26"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    }
+  ]
+}

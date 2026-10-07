@@ -1,0 +1,264 @@
+{
+  "schema_version": 1,
+  "id": "star_trek_voyager_s6_de_split_dvd",
+  "series": "Star Trek: Voyager",
+  "season": 6,
+  "edition": "de_split_season_dvd",
+  "edition_name": "German DVD split-season release, Season 6 Part 1 / Part 2",
+  "title_aliases": [
+    "Star Trek – Raumschiff Voyager",
+    "Star Trek Voyager"
+  ],
+  "edition_tokens": [
+    "star_trek_voyager",
+    "season_6",
+    "german_dvd",
+    "split_season_release"
+  ],
+  "approved": false,
+  "provenance": [
+    "PHOTO EVIDENCE: contributor-supplied photographs; originals retained privately and not included in this repository.",
+    "ONLINE: STAR TREK DE split-season product pages, startrek.de (release-specific disc/episode order).",
+    "ONLINE: Fernsehserien.de Star Trek – Raumschiff Voyager episode guide (season/library numbering).",
+    "ONLINE: https://www.startrek.de/produkte/details/1194",
+    "ONLINE: https://www.startrek.de/produkte/details/1195",
+    "ONLINE: https://www.fernsehserien.de/star-trek-raumschiff-voyager/episodenguide/staffel-6/945"
+  ],
+  "unresolved": [
+    "Disc-to-episode placement is based on supplied physical insert photographs and checked release-specific online listings.",
+    "Library numbering is kept distinct from printed physical numbering where they differ.",
+    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+  ],
+  "discs": [
+    {
+      "id": "voyager_s6_d1",
+      "number": 1,
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "Equinox, Teil II"
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Überlebensinstinkt"
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Die Barke der Toten"
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Dame, Doktor, Ass, Spion"
+        }
+      ],
+      "labels": [
+        "DISC 1: EPISODEN 1-4"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s6_d2",
+      "number": 2,
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "Alice"
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Rätsel"
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Die Zähne des Drachen"
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Ein kleiner Schritt"
+        }
+      ],
+      "labels": [
+        "DISC 2: EPISODEN 5-8"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s6_d3",
+      "number": 3,
+      "episodes": [
+        {
+          "printed": "9",
+          "number": 9,
+          "title": "Die Voyager-Konspiration"
+        },
+        {
+          "printed": "10",
+          "number": 10,
+          "title": "Das Pfadfinder-Projekt"
+        },
+        {
+          "printed": "11",
+          "number": 11,
+          "title": "Fair Haven"
+        },
+        {
+          "printed": "12",
+          "number": 12,
+          "title": "Es geschah in einem Augenblick"
+        }
+      ],
+      "labels": [
+        "DISC 3: EPISODEN 9-12"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s6_d4",
+      "number": 4,
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Der Virtuose"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "Das Mahnmal"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Tsunkatse"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Kollektiv"
+        }
+      ],
+      "labels": [
+        "DISC 4: EPISODEN 13-16"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s6_d5",
+      "number": 5,
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Das Geistervolk"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "Asche zu Asche"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Icheb"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Der gute Hirte"
+        }
+      ],
+      "labels": [
+        "DISC 5: EPISODEN 17-20"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s6_d6",
+      "number": 6,
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Lebe flott und in Frieden"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Die Muse"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Voller Wut"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "Rettungsanker"
+        }
+      ],
+      "labels": [
+        "DISC 6: EPISODEN 21-24"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s6_d7",
+      "number": 7,
+      "episodes": [
+        {
+          "printed": "25",
+          "number": 25,
+          "title": "Der Spuk von Deck Zwölf"
+        },
+        {
+          "printed": "26",
+          "number": 26,
+          "title": "Unimatrix Zero, Teil I"
+        }
+      ],
+      "labels": [
+        "DISC 7: EPISODEN 25-26"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    }
+  ]
+}

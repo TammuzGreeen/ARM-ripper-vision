@@ -1,0 +1,168 @@
+{
+  "schema_version": 1,
+  "id": "borgia_s1_2016_gesamtedition_bluray",
+  "series": "Borgia",
+  "season": 1,
+  "provider_ids": {
+    "ean": "4006680082547"
+  },
+  "edition": "2016_gesamtedition_bluray",
+  "edition_name": "Borgia – Gesamtedition [8 Blu-rays], Director's Cut",
+  "title_aliases": [
+    "Borgia"
+  ],
+  "edition_tokens": [
+    "borgia",
+    "gesamtedition",
+    "bluray",
+    "directors_cut",
+    "2016"
+  ],
+  "approved": false,
+  "provenance": [
+    "PHOTO EVIDENCE: contributor-supplied photographs; originals retained privately and not included in this repository.",
+    "ONLINE: Fernsehserien.de Borgia season 1 episode guide: https://www.fernsehserien.de/borgia/episodenguide/staffel-1/14922",
+    "ONLINE: Fernsehserien.de Borgia season 2 episode guide: https://www.fernsehserien.de/borgia/episodenguide/staffel-2/14922",
+    "ONLINE: Fernsehserien.de Borgia season 3 episode guide: https://www.fernsehserien.de/borgia/episodenguide/staffel-3/14922",
+    "ONLINE: bluray-disc.de Borgia complete series: https://bluray-disc.de/blu-ray-filme/100185-borgia_die_komplette_serie_gesamtedition",
+    "ONLINE: Thalia Borgia Gesamtedition [8 BRs], EAN 4006680082547: https://www.thalia.de/shop/home/artikeldetails/A1040644963"
+  ],
+  "unresolved": [
+    "The photographs and checked online sources support the 2016 Studiocanal 8-Blu-ray complete edition identification (EAN 4006680082547).",
+    "Episode titles are online enrichment; the photographed Borgia discs print episode ranges but not individual titles.",
+    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+  ],
+  "discs": [
+    {
+      "id": "borgia_s1_d1",
+      "number": 1,
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "1492",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Die Hitzewelle",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Ein heiliger Schwur",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Die Weisheit des heiligen Geistes",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        }
+      ],
+      "printed_identifiers": [
+        "505877 L1"
+      ],
+      "labels": [
+        "EPISODEN 1 - 4",
+        "Laufzeit ca. 225 Min.",
+        "FSK ab 18"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "borgia_s1_d2",
+      "number": 2,
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "Der Bund der Ehe",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Legitimität",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Schachzüge",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Vorboten der Apokalypse",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        }
+      ],
+      "printed_identifiers": [
+        "505877 L2"
+      ],
+      "labels": [
+        "EPISODEN 5 - 8",
+        "Laufzeit ca. 227 Min.",
+        "FSK ab 18"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "borgia_s1_d3",
+      "number": 3,
+      "episodes": [
+        {
+          "printed": "9",
+          "number": 9,
+          "title": "Die Invasion Roms",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "10",
+          "number": 10,
+          "title": "Wunder",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "11",
+          "number": 11,
+          "title": "Gottes Ungeheuer",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        },
+        {
+          "printed": "12",
+          "number": 12,
+          "title": "Die Schlange erhebt sich",
+          "numbering_note": "Episode number is established by the printed disc range; title is sourced online because no episode title is printed on the photographed disc."
+        }
+      ],
+      "printed_identifiers": [
+        "505877 L3"
+      ],
+      "labels": [
+        "EPISODEN 9 - 12",
+        "Laufzeit ca. 238 Min.",
+        "FSK ab 18"
+      ],
+      "unresolved": [
+        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
+        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    }
+  ]
+}
