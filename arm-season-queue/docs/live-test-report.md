@@ -32,7 +32,7 @@ calibration before the fresh presentation. Physical tray closure, the current
 disc's readability, scan parsing against the fresh medium, the GUI proposal,
 and the assessment remain outstanding.
 
-The active application suite passes **148 tests** in a network-isolated Linux
+The active application suite passes **150 tests** in a network-isolated Linux
 container, including dry-run parsing/planning, scan inventory and mapping
 conflict blockers, excluded titles, database privacy, same-capture association,
 non-pairing, no-reservation behavior, and a dry-run tick that does not query ARM

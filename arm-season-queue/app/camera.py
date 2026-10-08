@@ -56,6 +56,7 @@ class Camera:
         self.previous = None
         self.gate = PresentationGate()
         self.event = None
+        self.event_started_at = None
         self.samples = []
         self.full_samples = []
         self.short_transcriptions = {}
@@ -66,6 +67,12 @@ class Camera:
     def snapshot(self):
         with self.lock:
             return dict(self.status, busy=self.diagnostic_busy or bool(self.future and not self.future.done()), backend=self.s.recognition_backend)
+
+    def capture_deadline_reached(self, now=None):
+        now = time.monotonic() if now is None else now
+        return bool(self.event and not getattr(self, 'submitted', False)
+                    and self.event_started_at is not None
+                    and now - self.event_started_at >= self.s.presentation_timeout)
 
     def begin(self, source):
         review_only = self.s.recognition_backend in ('ollama', 'llamacpp', 'openai-compatible')
@@ -287,10 +294,12 @@ class Camera:
                         if present and self.event is None:
                             # Invalidate previous evidence on object arrival, even if blurry/unreadable.
                             self.event = self.begin('camera')
+                            self.event_started_at = time.monotonic()
                             self.samples = []
                             self.full_samples = []
                             self.collecting = False
                             self.submitted = False
+                            self.capture_failed = False
                         action = self.gate.observe(present, stable, sharp>=self.s.sharpness and glare<.55)
                         # Release also needs to work for an object that never became sharp enough.
                         if not present and self.gate.empty>=8 and self.event:
@@ -300,8 +309,11 @@ class Camera:
                                 self.samples = []
                                 self.full_samples = []
                             self.event = None
+                            self.event_started_at = None
                         if action == 'capture':
-                            if self.future is not None and not self.future.done():
+                            if self.submitted:
+                                pass
+                            elif self.future is not None and not self.future.done():
                                 self.status['message'] = 'OCR busy; remove media and present again after completion'
                                 self.on_result(self.event, {'accepted':False,'frames':[], 'reason':'OCR busy; remove and present this media again'})
                             else:
@@ -320,6 +332,13 @@ class Camera:
                                 self.submitted = True
                                 self.future = self.pool.submit(self.process, self.event, images, False, 'webcam', False, originals)
                                 self.status['message'] = 'Reading 3 captured frames; remove media before insertion'
+                        if self.capture_deadline_reached():
+                            self.submitted = True
+                            self.capture_failed = True
+                            self.collecting = False
+                            self.on_result(self.event, {'accepted':False,'frames':[],
+                                'reason':f'No stable, sharp camera capture within {self.s.presentation_timeout} seconds; review or continue with drive scan'})
+                            self.status['message'] = 'Camera capture timed out; drive scan may continue in dry-run review'
                     self.previous = small
                 self.stop.wait(.15)
             except Exception as exc:
@@ -331,6 +350,7 @@ class Camera:
                     if self.event:
                         self.on_result(self.event, {'accepted':False, 'frames':[], 'reason':'Camera disconnected; recapture required'})
                     self.event = None
+                    self.event_started_at = None
                     self.samples = []
                     self.full_samples = []
                     self.gate = PresentationGate()

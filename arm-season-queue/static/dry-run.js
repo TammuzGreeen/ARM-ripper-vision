@@ -30,6 +30,7 @@
     panel.append(node('h3',`${master?.series||run.master} · Season ${master?.season??'?'} · Disc ${disc?.number??run.disc}`));
     if(run.event)panel.append(node('p',`Fresh capture event UUID: ${run.event}`,'muted'));
     panel.append(node('p','This is a separate dry-run record. No production reservation/completion is written; all destinations are proposals only.','muted'));
+    for(const attempt of run.capture_attempts||[])panel.append(node('p',`Prior camera attempt ${attempt.status}: ${attempt.reason}`,'error'));
     if(run.recognition){
       panel.append(node('h3','Fresh camera presentation · configured production recognition'));
       const evidence=run.recognition.result?.frames?.[0]?.evidence;

@@ -31,6 +31,34 @@ class Controller:
         if not settings.dry_run_only:
             self.db.invalidate_pending(include_rejections=True)
             self.db.execute("UPDATE reservations SET state='ripping' WHERE state='validating'")
+        else:
+            self.recover_interrupted_dry_run_capture()
+
+    def recover_interrupted_dry_run_capture(self):
+        """Re-arm only a dry-run presentation interrupted before any result."""
+        run = self.db.get('active_dry_run')
+        if not run or run.get('status') != 'recognizing' or run.get('recognition') is not None:
+            return
+        event = run.get('event')
+        if event:
+            rows = self.db.rows('SELECT body FROM events WHERE id=?', (event,))
+            if rows:
+                body = json.loads(rows[0]['body'])
+                body['dry_run_capture_lifecycle'] = {
+                    'eligible':False, 'reason':'service_restarted_before_camera_capture_or_recognition',
+                    'recorded_at':time.time(),
+                }
+                self.db.execute("UPDATE events SET body=?,status='invalidated' WHERE id=?",
+                                (encode(body), event))
+        run.setdefault('capture_attempts', []).append({
+            'event':event, 'status':'interrupted',
+            'reason':'service restarted before camera capture or recognition completed',
+            'recorded_at':time.time(),
+        })
+        run['event'] = None
+        run['recognition'] = None
+        run['status'] = 'awaiting_capture'
+        self.db.put('active_dry_run', run)
 
     def start(self):
         self.thread = threading.Thread(target=self.run,daemon=True)

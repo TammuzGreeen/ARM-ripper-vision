@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from app.dry_run import build_plan, parse_info
 from app.formats import Disc, Episode, Inventory, Masterlist, TitleMap, digest
 from app.controller import Controller
+from app.camera import Camera
 from app.state import Store
 from tempfile import TemporaryDirectory
 from pathlib import Path
@@ -186,6 +187,29 @@ class DryRunTests(unittest.TestCase):
             fresh=db.new_event('dry_run_camera',isolated=True)
             self.assertEqual(db.rows('SELECT status FROM events WHERE id=?',(old,))[0]['status'],'ready')
             self.assertEqual(db.rows('SELECT status FROM events WHERE id=?',(fresh,))[0]['status'],'processing')
+
+    def test_dryrun_restart_records_interrupted_attempt_and_rearms_capture(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.state import Store
+        with TemporaryDirectory() as temp:
+            c=Controller.__new__(Controller);c.db=Store(Path(temp)/'queue.sqlite3')
+            event=c.db.new_event('dry_run_camera',isolated=True)
+            c.db.put('active_dry_run',{'id':'run','status':'recognizing','event':event,'recognition':None})
+            c.recover_interrupted_dry_run_capture()
+            run=c.db.get('active_dry_run')
+            self.assertEqual(run['status'],'awaiting_capture')
+            self.assertIsNone(run['event'])
+            self.assertEqual(run['capture_attempts'][0]['event'],event)
+            self.assertEqual(c.db.rows('SELECT status FROM events WHERE id=?',(event,))[0]['status'],'invalidated')
+
+    def test_camera_capture_gate_has_a_bounded_failure_deadline(self):
+        c=Camera.__new__(Camera);c.event='event';c.event_started_at=100.0;c.submitted=False
+        c.s=SimpleNamespace(presentation_timeout=60)
+        self.assertFalse(c.capture_deadline_reached(159.9))
+        self.assertTrue(c.capture_deadline_reached(160.0))
+        c.submitted=True
+        self.assertFalse(c.capture_deadline_reached(200.0))
 
     def test_dryrun_restart_preserves_production_event_and_reservation_rows(self):
         from tempfile import TemporaryDirectory

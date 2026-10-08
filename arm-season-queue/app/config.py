@@ -27,6 +27,7 @@ class Settings:
     camera_rotation: int = int(os.getenv('CAMERA_ROTATION', '0'))
     roi: str = os.getenv('CAMERA_ROI', '0.15,0.1,0.85,0.9')
     sharpness: float = float(os.getenv('CAMERA_SHARPNESS', '100'))
+    presentation_timeout: int = int(os.getenv('PRESENTATION_CAPTURE_TIMEOUT_SECONDS', '60'))
     ocr_lang: str = os.getenv('OCR_LANG', 'deu+eng')
     recognition_backend: str = os.getenv('RECOGNITION_BACKEND', 'tesseract')
     vision_url: str = os.getenv('VISION_BASE_URL', '').rstrip('/')
@@ -62,6 +63,8 @@ class Settings:
                 raise ValueError('Set VISION_MODEL to the exact image-capable model ID served by your server')
         if self.camera_mode not in ('', 'manual', 'auto'):
             raise ValueError('CAMERA_MODE must be manual or auto')
+        if not 10 <= self.presentation_timeout <= 300:
+            raise ValueError('PRESENTATION_CAPTURE_TIMEOUT_SECONDS must be between 10 and 300')
         if self.camera_rotation not in (0, 180):
             raise ValueError('CAMERA_ROTATION must be 0 or 180')
         if self.arm_url:
