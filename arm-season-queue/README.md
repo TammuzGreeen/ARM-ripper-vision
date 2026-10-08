@@ -122,7 +122,6 @@ report, config, keys or capture in Git):
 ```sh
 python3 scripts/dry_run_info_scan.py \
   --arm-api http://127.0.0.1:18080/api/v1 \
-  --arm-container <local-arm-container> \
   --makemkv-image <qualified-scan-only-image> \
   --makemkv-config /path/to/private/MakeMKV-config \
   --report-dir /path/to/private/dry-run-reports \

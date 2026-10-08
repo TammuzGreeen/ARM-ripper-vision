@@ -34,20 +34,33 @@ def api_json(base, path):
         return json.load(response)
 
 
+def held_current_job(drives, jobs, device):
+    selected = [d for d in drives if d.get('mount') == device]
+    if len(selected) != 1:
+        raise RuntimeError('Configured ARM drive is missing or ambiguous')
+    current = selected[0].get('job_id_current')
+    if not jobs and current is None:
+        return None
+    if (len(jobs) != 1 or current is None or jobs[0].get('job_id') != current
+            or jobs[0].get('status') != 'manual_paused' or jobs[0].get('manual_start') is not False):
+        raise RuntimeError('ARM must have no jobs or exactly one current manual_paused job with no start request')
+    return jobs[0]
+
+
 def check_arm(base, device):
     pause = api_json(base, '/system/ripping-enabled')
     if pause.get('ripping_enabled') is not False:
         raise RuntimeError('ARM global pause is not verified; scan refused')
     jobs = api_json(base, '/jobs/paginated?page=1&per_page=100')
-    if jobs.get('total', len(jobs.get('jobs', []))) != 0 or jobs.get('jobs'):
-        raise RuntimeError('ARM has jobs; info scan refused to avoid concurrent processing')
     drive_data = api_json(base, '/drives')
+    count = jobs.get('total', len(jobs.get('jobs', [])))
+    if count != len(jobs.get('jobs', [])):
+        raise RuntimeError('ARM job listing is incomplete; refusing drive scan')
+    held = held_current_job(drive_data.get('drives', []), jobs.get('jobs', []), device)
     selected = [d for d in drive_data.get('drives', []) if d.get('mount') == device]
-    if len(selected) != 1 or selected[0].get('job_id_current') is not None:
-        raise RuntimeError('Configured ARM drive is missing, ambiguous, or has a current job')
     if selected[0].get('drive_mode') != 'auto':
         raise RuntimeError('ARM drive is not in the inspected automatic mode')
-    return selected[0]
+    return {'drive':selected[0], 'held_job':held}
 
 
 def drive_ioctl(device, operation):
@@ -91,12 +104,6 @@ def require_all_stream_profile(config_dir):
         raise RuntimeError('Persistent MakeMKV app_DefaultSelectionString is not exactly +sel:all')
 
 
-def arm_worker_present(container):
-    probe = subprocess.run(['docker','exec',container,'sh','-lc',
-        'pgrep -af "[m]ain.py.*-d sr[0-9]+"'],capture_output=True,text=True)
-    return probe.returncode == 0 and bool(probe.stdout.strip())
-
-
 def stop_scan(proc, message):
     proc.terminate()
     try:
@@ -106,7 +113,7 @@ def stop_scan(proc, message):
     raise RuntimeError(message)
 
 
-def scan(command, report, device, timeout, arm_api, arm_container):
+def scan(command, report, device, timeout, arm_api):
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             bufsize=4096)
     selector = selectors.DefaultSelector()
@@ -132,8 +139,6 @@ def scan(command, report, device, timeout, arm_api, arm_container):
             if time.monotonic() - last_check >= 1:
                 if drive_ioctl(device, MEDIA_CHANGED):
                     stop_scan(proc,'Drive reported media removal/replacement during scan; report is invalid')
-                if arm_worker_present(arm_container):
-                    stop_scan(proc,'ARM processing started; aborted MakeMKV scan to avoid concurrent drive access')
                 if time.monotonic() - last_arm_check >= 5:
                     try:
                         check_arm(arm_api, device)
@@ -156,7 +161,6 @@ def main():
     p.add_argument('--device', default='/dev/sr0')
     p.add_argument('--sg-device', default='/dev/sg0')
     p.add_argument('--arm-api', required=True, help='Read-only ARM API base, e.g. http://127.0.0.1:18080/api/v1')
-    p.add_argument('--arm-container', required=True, help='Local ARM container name, used only to check for an active ripper process')
     p.add_argument('--makemkv-image', required=True, help='Prequalified scan-only image containing MakeMKV')
     p.add_argument('--makemkv-config', type=Path, required=True, help='Persistent MakeMKV config directory, mounted read-only')
     p.add_argument('--report-dir', type=Path, required=True, help='Private local directory outside Git')
@@ -185,7 +189,7 @@ def main():
     os.close(report_fd)
     report = Path(name)
     try:
-        drive = check_arm(a.arm_api, a.device)
+        arm_state = check_arm(a.arm_api, a.device)
         require_all_stream_profile(a.makemkv_config)
         if drive_ioctl(a.device, DRIVE_STATUS) == 2:
             drive_ioctl(a.device, CLOSE_TRAY)
@@ -193,9 +197,7 @@ def main():
         clear_media_change(a.device)
         # The ARM source profile confirms its /drives/{id}/scan route launches
         # processing. Never call it; stop if its local worker started anyway.
-        if arm_worker_present(a.arm_container):
-            raise RuntimeError('ARM ripper process appeared after tray closure; aborting concurrent scan')
-        check_arm(a.arm_api, a.device)
+        arm_state = check_arm(a.arm_api, a.device)
         cmd = ['docker','run','--rm','--network','none','--read-only',
                '--tmpfs','/tmp:rw,nosuid,nodev,size=512m','--user','0:24','--cap-drop','ALL',
                '--env','HOME=/root','--device',f'{a.device}:/dev/sr0:rw',
@@ -204,9 +206,11 @@ def main():
                '--entrypoint','/opt/makemkv/bin/makemkvcon',a.makemkv_image,
                '-r','info','--cache=1','dev:/dev/sr0','--minlength=0']
         print('Operation: MakeMKV info only; network disabled; no media output path is mounted.')
-        print('ARM global pause and empty-job state were checked; ARM processing scan route was not called.')
+        print('ARM global pause was verified; any current ARM job was required to be manual_paused with no start request. No ARM scan route was called.')
+        if arm_state['held_job']:
+            print('ARM held job:',arm_state['held_job'].get('job_id'),'manual_paused')
         print(f'Private report: {report}')
-        scan(cmd, report, a.device, a.scan_timeout, a.arm_api, a.arm_container)
+        scan(cmd, report, a.device, a.scan_timeout, a.arm_api)
         if drive_ioctl(a.device, MEDIA_CHANGED):
             raise RuntimeError('Drive media-change status changed during the scan; association invalidated')
         if drive_ioctl(a.device, DRIVE_STATUS) != 4:

@@ -222,6 +222,18 @@ class DryRunTests(unittest.TestCase):
         self.assertFalse(dry_scan.data_medium_ready(2,101))
         self.assertFalse(dry_scan.data_medium_ready(4,1))
 
+    def test_scan_allows_only_zero_jobs_or_one_current_manual_paused_job(self):
+        drive=[{'mount':'/dev/sr0','job_id_current':None}]
+        self.assertIsNone(dry_scan.held_current_job(drive,[],'/dev/sr0'))
+        drive[0]['job_id_current']=7
+        held={'job_id':7,'status':'manual_paused','manual_start':False}
+        self.assertEqual(dry_scan.held_current_job(drive,[held],'/dev/sr0'),held)
+        for jobs in ([{'job_id':7,'status':'ready','manual_start':False}],
+                     [{'job_id':7,'status':'manual_paused','manual_start':True}],
+                     [held,{'job_id':8,'status':'manual_paused','manual_start':False}], []):
+            with self.assertRaisesRegex(RuntimeError,'manual_paused'):
+                dry_scan.held_current_job(drive,jobs,'/dev/sr0')
+
     def test_dryrun_restart_preserves_production_event_and_reservation_rows(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
