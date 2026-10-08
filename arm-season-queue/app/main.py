@@ -87,7 +87,7 @@ def create_app(settings=None, start_workers=True):
 
     @app.get('/static/{filename}')
     def static(filename:str):
-        if filename not in ('app.js','style.css'):
+        if filename not in ('app.js','style.css','dry-run.js'):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent.parent/'static'/filename)
 
@@ -141,6 +141,30 @@ def create_app(settings=None, start_workers=True):
         body = json.loads(await limited(request))
         return {'batch':await asyncio.to_thread(controller.activate,body['master'])}
 
+    @app.post('/api/dry-run')
+    async def dry_run(request:Request):
+        body = json.loads(await limited(request))
+        if camera.mode != 'auto' or not camera.snapshot().get('connected'):
+            raise HTTPException(409, 'Dry-run capture requires the connected camera in Automatic mode')
+        if camera.event is not None or camera.snapshot().get('busy'):
+            raise HTTPException(409, 'Clear the current presentation and wait for camera processing to finish')
+        return await asyncio.to_thread(controller.start_dry_run,body.get('master'),body.get('disc'))
+
+    @app.post('/api/dry-run/{run_id}/correction')
+    async def dry_run_correction(run_id:str,request:Request):
+        body = json.loads(await limited(request))
+        return await asyncio.to_thread(controller.save_dry_run_correction,run_id,body)
+
+    @app.post('/api/dry-run/{run_id}/scan')
+    async def dry_run_scan(run_id:str,request:Request):
+        body = json.loads(await limited(request,2_100_000))
+        return await asyncio.to_thread(controller.receive_dry_run_scan,run_id,body.get('info'),body.get('context'))
+
+    @app.post('/api/dry-run/{run_id}/assessment')
+    async def dry_run_assessment(run_id:str,request:Request):
+        body = json.loads(await limited(request))
+        return await asyncio.to_thread(controller.assess_dry_run,run_id,body.get('outcome'),body.get('notes',''))
+
     @app.post('/api/action')
     async def action(request:Request):
         body = json.loads(await limited(request))
@@ -151,14 +175,16 @@ def create_app(settings=None, start_workers=True):
     def calibrate():
         with camera.lock:
             camera.calibrate()
-            controller.db.invalidate_pending(include_rejections=True)
+            if not settings.dry_run_only:
+                controller.db.invalidate_pending(include_rejections=True)
         return {'ok':True}
 
     @app.post('/api/camera/recapture')
     def recapture():
         with camera.lock:
             camera.recapture()
-            controller.db.invalidate_pending(include_rejections=True)
+            if not settings.dry_run_only:
+                controller.db.invalidate_pending(include_rejections=True)
         return {'ok':True}
 
     @app.post('/api/camera/mode')
@@ -166,7 +192,8 @@ def create_app(settings=None, start_workers=True):
         body = json.loads(await limited(request))
         with camera.lock:
             camera.set_mode(body.get('mode'))
-            controller.db.invalidate_pending(include_rejections=True)
+            if not settings.dry_run_only:
+                controller.db.invalidate_pending(include_rejections=True)
         return {'ok':True}
 
     @app.post('/api/camera/capture')

@@ -376,14 +376,16 @@ class WebTests(unittest.TestCase):
                 client.auth=('operator','unit-test-only')
                 self.assertEqual(client.get('/').status_code,200)
                 html=client.get('/').text
-                for label in ('Disc workflow','workflow-stages','Next disc'):
+                for label in ('Disc workflow','workflow-stages','Next disc','Production-like dry run'):
                     self.assertIn(label,html)
                 self.assertIn('draft-episodes',html)
                 js=client.get('/static/app.js')
                 self.assertEqual(js.status_code,200)
-                for label in ('Ready','Camera recognition','Recognition and review','ARM handoff and ripping','Finished and FileFlows handoff','Confirm corrections and continue'):
+                for label in ('Ready','Camera recognition','Recognition and review','ARM handoff and ripping','Finished and FileFlows handoff','Confirm corrections and continue','Late result retained as evidence only'):
                     self.assertIn(label,js.text)
                 self.assertIn('max-width:760px',client.get('/static/style.css').text)
+                self.assertEqual(client.get('/static/dry-run.js').status_code,200)
+                self.assertIn('WOULD BE CREATED',client.get('/static/dry-run.js').text)
                 self.assertEqual(client.get('/api/schema/masterlist').status_code,200)
                 self.assertEqual(client.post('/api/masters',content=master().model_dump_json()).status_code,403)
                 r=client.post('/api/masters',content=master().model_dump_json(),headers={'X-Queue-Request':'1'})

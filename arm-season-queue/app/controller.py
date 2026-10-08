@@ -11,6 +11,7 @@ from uuid import uuid4
 from .arm import ARM, job_identity, plan, structure
 from .agreement import MODEL_ORDER, normalize as normalize_printed, preflight as agreement_preflight
 from .formats import Masterlist, digest
+from .dry_run import build_plan as build_dry_run_plan, parse_info
 from .handover import beneath, canonical, inspect_file, publish_json
 from .recognition import match
 from .state import Store, encode
@@ -27,8 +28,9 @@ class Controller:
         self.futures = {}
         self.status = 'Not connected; camera and masterlist tools are available'
         self.initialized = False
-        self.db.invalidate_pending(include_rejections=True)
-        self.db.execute("UPDATE reservations SET state='ripping' WHERE state='validating'")
+        if not settings.dry_run_only:
+            self.db.invalidate_pending(include_rejections=True)
+            self.db.execute("UPDATE reservations SET state='ripping' WHERE state='validating'")
 
     def start(self):
         self.thread = threading.Thread(target=self.run,daemon=True)
@@ -96,6 +98,8 @@ class Controller:
 
     def activate(self, master_id):
         with self.lock:
+            if self.s.dry_run_only:
+                raise ValueError('This deployment is locked to dry-run mode; ARM jobs cannot be configured or started')
             if self.s.recognition_backend != 'ollama-agreement':
                 raise ValueError('Automatic ripping requires RECOGNITION_BACKEND=ollama-agreement')
             model_check = agreement_preflight(self.s)
@@ -122,10 +126,159 @@ class Controller:
         return batch
 
     def begin_event(self, source):
-        return self.db.new_event(source)
+        run = self.db.get('active_dry_run')
+        dry_camera = bool(self.s.dry_run_only and run and run.get('status') == 'awaiting_capture'
+                          and source == 'camera')
+        event_source = ('dry_run_camera' if dry_camera else f'dry_run_{source}'
+                        if self.s.dry_run_only else source)
+        event = self.db.new_event(event_source, isolated=self.s.dry_run_only)
+        if dry_camera:
+            run.update(event=event, status='recognizing', capture_source='live_camera', created=time.time())
+            self.db.put('active_dry_run', run)
+        return event
 
     def release_event(self, event):
+        run = self.db.get('active_dry_run')
+        if run and run.get('event') == event:
+            return
         self.db.execute('UPDATE events SET released=1 WHERE id=?',(event,))
+
+    def start_dry_run(self, master_id, disc_id):
+        with self.lock:
+            if not self.s.dry_run_only:
+                raise ValueError('DRY_RUN_ONLY must be enabled before beginning a supervised dry run')
+            if self.s.fileflows_enabled:
+                raise ValueError('FileFlows must be disabled for a dry run')
+            if self.db.get('active_batch') or self.db.rows("SELECT 1 FROM reservations WHERE state NOT IN ('failed','cancelled')"):
+                raise ValueError('A production batch or reservation exists; dry run refused')
+            current = self.db.get('active_dry_run')
+            if current and current.get('status') not in ('assessed','abandoned'):
+                raise ValueError('Finish or explicitly abandon the current dry run first')
+            readiness = self.arm.inspect()
+            self.db.put('preflight', readiness)
+            if readiness['issues']:
+                raise ValueError('; '.join(readiness['issues']))
+            if self.arm.jobs():
+                raise ValueError('ARM has jobs; dry run requires an empty job queue')
+            models = agreement_preflight(self.s)
+            self.db.put('agreement_preflight', models)
+            if not models['ready']:
+                raise ValueError('Configured recognition pipeline is not ready: ' + '; '.join(models['issues']))
+            master = next((m for m in self.masters() if m.id == master_id and m.approved), None)
+            disc = next((d for d in master.discs if d.id == disc_id), None) if master else None
+            if not master or not disc:
+                raise ValueError('Choose an approved masterlist and one of its discs')
+            if self.s.recognition_backend != 'ollama-agreement':
+                raise ValueError('Dry run requires the configured production agreement recognition pipeline')
+            run = {'id':str(uuid4()), 'status':'awaiting_capture', 'created':time.time(),
+                   'master':master_id, 'masterlist_sha256':digest(master), 'disc':disc_id,
+                   'assessment':None, 'recognition':None, 'correction':None, 'scan':None, 'plan':None}
+            self.db.put('active_dry_run', run)
+            return run
+
+    def save_dry_run_correction(self, run_id, correction):
+        allowed = {'series','season','disc_number','episodes','titles','edition','notes'}
+        if not isinstance(correction, dict) or set(correction)-allowed:
+            raise ValueError('Unsupported dry-run correction fields')
+        with self.lock:
+            run = self._dry_run(run_id)
+            if run.get('status') not in ('review','scan_received','plan_blocked'):
+                raise ValueError('Corrections are available only after camera recognition has completed')
+            if not all(str(correction.get(k,'')).strip() for k in ('series','season','disc_number','episodes','notes')):
+                raise ValueError('An authoritative correction requires series, season, disc number, episodes and review notes')
+            master, disc = self._dry_run_master(run)
+            if not self._correction_matches_disc(correction, master, disc):
+                raise ValueError('Human correction conflicts with the approved masterlist/disc selected for this dry run')
+            run['correction'] = {'source':'human', 'entered_at':time.time(), 'fields':correction}
+            run['status'] = 'scan_received' if run.get('scan') else 'review'
+            if run.get('scan'):
+                self._rebuild_dry_run_plan(run)
+            self.db.put('active_dry_run', run)
+            return run
+
+    def receive_dry_run_scan(self, run_id, text, context):
+        if not isinstance(context, dict) or context.get('device') != self.s.drive:
+            raise ValueError('Scan must identify the configured optical device')
+        if context.get('tray_closed') is not True or context.get('medium_ready') is not True:
+            raise ValueError('Scan evidence does not verify a closed tray and ready medium')
+        if context.get('media_changed_during_scan') is not False:
+            raise ValueError('Drive reports removal/replacement during scan; association invalidated')
+        if (context.get('same_insertion') is not True or context.get('operation') != 'makemkvcon-info-only'
+                or context.get('media_output_created') is not False):
+            raise ValueError('Scan is not attested as the same insertion and MakeMKV info-only with no media output')
+        with self.lock:
+            run = self._dry_run(run_id)
+            if context.get('capture_event') != run.get('event'):
+                raise ValueError('Scan belongs to another camera event; dry-run association invalidated')
+            marker = f"# DRY_RUN_CAPTURE_EVENT:{run.get('event')}\n"
+            if not isinstance(text, str) or not text.startswith(marker):
+                raise ValueError('Info report is not bound to this fresh dry-run camera event')
+            info = parse_info(text[len(marker):])
+            if run.get('status') not in ('review','recognizing','awaiting_scan','scan_received','plan_blocked'):
+                raise ValueError('Dry run is not in a state that accepts scan evidence')
+            if run.get('event') is None or run.get('recognition') is None:
+                # Failed recognition remains a valid dry-run outcome; callers may
+                # explicitly use a separate non-empty failure record.
+                raise ValueError('Wait for recognition to complete or record its bounded failure first')
+            run['scan'] = {'received_at':time.time(), 'context':context, 'summary':{
+                'disc_type':info['disc'].get('type'), 'disc_label':info['disc'].get('label'),
+                'title_count':info['title_count'],
+                'titles':[{'makemkv_id':t['makemkv_id'],'dvd_title':t.get('dvd_title'),
+                           'angle_count':t.get('angle_count'),'duration':t.get('duration'),
+                           'chapters':t.get('chapters'),'chapter_range':t.get('chapter_range'),
+                           'size':t.get('size'),'size_bytes':t.get('size_bytes'),
+                           'video':t.get('video'),'audio':t['audio'],'subtitles':t['subtitles']}
+                          for _,t in sorted(info['disc']['titles'].items())]},
+                'info':info}
+            run['status'] = 'scan_received'
+            self._rebuild_dry_run_plan(run)
+            self.db.put('active_dry_run', run)
+            return run
+
+    def _dry_run(self, run_id):
+        run = self.db.get('active_dry_run')
+        if not run or run.get('id') != run_id:
+            raise ValueError('Dry-run record not found')
+        return run
+
+    def _dry_run_master(self, run):
+        master = next((m for m in self.masters() if m.id == run['master']), None)
+        disc = next((d for d in master.discs if d.id == run['disc']), None) if master else None
+        if not master or digest(master) != run['masterlist_sha256'] or not disc:
+            raise ValueError('Approved masterlist changed during dry run; plan invalidated')
+        return master, disc
+
+    def _rebuild_dry_run_plan(self, run):
+        master, disc = self._dry_run_master(run)
+        recognition = run.get('recognition') or {}
+        matches = recognition.get('matches') or []
+        matched = len(matches) == 1 and matches[0].get('master') == master.id and matches[0].get('disc') == disc.id
+        human = run.get('correction') and run['correction'].get('source') == 'human'
+        blockers = []
+        if not matched and not human:
+            blockers.append('Camera recognition has no unique match to this approved masterlist disc; manual review required')
+        output = build_dry_run_plan(master, disc, run['scan']['info'], self.s.dry_run_output_root)
+        output['identity_source'] = 'human correction' if human and not matched else 'camera agreement' if matched else 'unresolved camera result'
+        output['camera_matches'] = matches
+        output['human_correction'] = run.get('correction')
+        output['blockers'] = list(dict.fromkeys(blockers + output['blockers']))
+        output['plan_status'] = 'blocked' if output['blockers'] else 'provisional dry-run preview'
+        run['plan'] = output
+        run['status'] = 'review'
+
+    def assess_dry_run(self, run_id, outcome, notes=''):
+        if outcome not in ('test_successful','needs_changes'):
+            raise ValueError('Assessment must be Test successful or Needs changes')
+        with self.lock:
+            run = self._dry_run(run_id)
+            if not run.get('scan') or not run.get('plan'):
+                raise ValueError('Final review requires capture, recognition outcome, scan and proposed plan')
+            if outcome == 'test_successful' and run['plan'].get('blockers'):
+                raise ValueError('A blocked or contradictory proposed plan cannot be assessed as Test successful')
+            run['assessment'] = {'outcome':outcome,'notes':str(notes)[:2000],'assessed_at':time.time()}
+            run['status'] = 'assessed'
+            self.db.put('active_dry_run', run)
+            return run
 
     def agreement_authorized(self, result):
         if not isinstance(result, dict) or result.get('policy') != 'two-model-priority-field-agreement-v1':
@@ -245,8 +398,24 @@ class Controller:
                                and candidate_proofs[0].get('master') == item.get('master')
                                and candidate_proofs[0].get('disc') == item.get('disc'))
                 if master and disc and proof_match and item.get('masterlist_sha256') == digest(master):
-                    valid_matches.append(item)
+                     valid_matches.append(item)
             matches = valid_matches
+        event_rows = self.db.rows('SELECT body,status,created FROM events WHERE id=?',(event,))
+        if event_rows and str(json.loads(event_rows[0]['body']).get('source', '')).startswith('dry_run_'):
+            old_body = json.loads(event_rows[0]['body'])
+            run = self.db.get('active_dry_run')
+            if not run or run.get('event') != event or old_body.get('source') != 'dry_run_camera':
+                old_body.update(result=result, matches=[])
+                old_body['dry_run_association'] = {'eligible':False,'reason':'dry-run session no longer active'}
+                self.db.execute("UPDATE events SET body=?,status='invalidated' WHERE id=?",(encode(old_body),event))
+                return
+            old_body.update(result=result, matches=matches)
+            self.db.execute("UPDATE events SET body=?,status='review' WHERE id=?",(encode(old_body),event))
+            run['recognition'] = {'event':event,'status':'matched' if len(matches)==1 else 'unmatched',
+                                  'matches':matches,'result':result,'completed_at':time.time()}
+            run['status'] = 'review'
+            self.db.put('active_dry_run',run)
+            return
         pass_result = len(matches) == 1
         automatic_source = result.get('camera') is not None or result.get('backend') == 'ollama-agreement'
         status = 'ready' if pass_result else 'rejected_for_review' if automatic_source else 'review'
@@ -264,7 +433,7 @@ class Controller:
                 result['reason'] = 'Agreement-only priority-field validation failed; rejected for manual review'
         create_rejection = False
         with self.db.connect() as db:
-            old = db.execute('SELECT body,status FROM events WHERE id=?',(event,)).fetchone()
+            old = db.execute('SELECT body,status,created FROM events WHERE id=?',(event,)).fetchone()
             if old and old['status'] in ('processing','invalidated','expired'):
                 body = json.loads(old['body'])
                 event_source = body.get('source')
@@ -272,11 +441,25 @@ class Controller:
                     status = 'review'
                 elif event_source == 'camera' and not pass_result:
                     status = 'rejected_for_review'
-                # Keep late OCR as inspectable evidence, without restoring eligibility.
-                eligible = old['status']=='processing'
+                # A slow inference must not revive a capture whose TTL elapsed
+                # before the periodic expiry sweep ran. Retain its full model
+                # evidence, but make the late result unambiguously ineligible.
+                expired_during_processing = (old['status']=='processing'
+                                             and time.time()-old['created'] >= self.s.ttl)
+                eligible = old['status']=='processing' and not expired_during_processing
+                if not eligible:
+                    lifecycle_reason = ('capture_expired_before_recognition_completed'
+                                        if expired_during_processing or old['status']=='expired'
+                                        else 'capture_invalidated_before_recognition_completed')
+                    body['recognition_lifecycle'] = {
+                        'eligible': False, 'reason': lifecycle_reason,
+                        'completed_at': time.time(),
+                    }
+                # Keep the model result byte-for-byte semantically intact for
+                # audit. Event status and outer matches are the eligibility gate.
                 body.update(result=result,matches=matches if eligible else [])
                 db.execute('UPDATE events SET body=?,status=? WHERE id=?',
-                           (encode(body),status if eligible else old['status'],event))
+                           (encode(body),status if eligible else ('expired' if expired_during_processing else old['status']),event))
                 if eligible and status == 'rejected_for_review':
                     create_rejection = True
         if create_rejection:
@@ -398,6 +581,8 @@ class Controller:
             return self.db.rejection(rejection_id)
 
     def review_event(self, event, master_id, disc_id, note, job=None):
+        if self.s.dry_run_only:
+            raise ValueError('DRY_RUN_ONLY blocks human authorization and queue reservation')
         if not note.strip():
             raise ValueError('Record what you confirmed from the retained physical-media evidence')
         with self.lock:
@@ -505,6 +690,8 @@ class Controller:
 
     def action(self, action, job=None, disc=None):
         with self.lock:
+            if self.s.dry_run_only:
+                raise ValueError('DRY_RUN_ONLY blocks queue actions; this deployment cannot dispatch ARM work')
             batch = self.db.get('active_batch')
             if action in ('pause','resume','cancel'):
                 if not batch:
@@ -566,6 +753,13 @@ class Controller:
             self.stop.wait(3)
 
     def poll_once(self):
+        if self.s.dry_run_only:
+            self.status = 'Dry-run-only; ARM insertion polling and production queue mutations are disabled'
+            try:
+                self.prune_evidence()
+            except Exception as exc:
+                self.status = 'Dry-run evidence cleanup failed: ' + str(exc)
+            return
         # Camera-only setup is a supported mode, not an ARM polling outage.
         if not self.s.arm_url:
             self.status = 'Camera-only mode; ARM is not configured'
@@ -584,10 +778,15 @@ class Controller:
         except Exception as exc:
             self.status = str(exc)
             # Recognition captured during a polling outage cannot identify a new insertion reliably.
-            self.db.invalidate_pending(include_rejections=True)
+            if not self.s.dry_run_only:
+                self.db.invalidate_pending(include_rejections=True)
             self.initialized = False
 
     def tick(self):
+        # Local qualification deployments set DRY_RUN_ONLY at the execution
+        # boundary. Do not pair insertions, configure jobs, or start work.
+        if self.s.dry_run_only:
+            return
         self.db.execute("UPDATE events SET status='expired' WHERE job IS NULL AND created<? AND status IN ('processing','ready','review')",(time.time()-self.s.ttl,))
         drives = self.arm.call('GET','/drives')['drives']
         drive = next((d for d in drives if d['mount']==self.s.drive),None)
@@ -826,6 +1025,9 @@ class Controller:
         for batch in self.db.rows('SELECT master FROM batches'):
             protected.update(p.removeprefix('recognition:') for p in json.loads(batch['master']).get('provenance',[]) if p.startswith('recognition:'))
         protected.update(row['event'] for row in self.db.rows('SELECT event FROM rejected_rips'))
+        dry_run = self.db.get('active_dry_run')
+        if dry_run and dry_run.get('event'):
+            protected.add(dry_run['event'])
         for row in self.db.rows('SELECT id FROM events WHERE created<? AND id NOT IN (SELECT event FROM reservations)',(cutoff,)):
             if row['id'] in protected:
                 continue
@@ -842,6 +1044,7 @@ class Controller:
         events = self.db.rows('SELECT * FROM events ORDER BY created DESC LIMIT 30')
         for e in events:
             e['body']=json.loads(e['body'])
+        events = [e for e in events if not str(e['body'].get('source', '')).startswith('dry_run_')]
         reservations = self.db.rows('SELECT * FROM reservations ORDER BY job DESC')
         for r in reservations:
             body = json.loads(r.pop('body'))
@@ -883,4 +1086,6 @@ class Controller:
                 'reservations':reservations,'skipped':self.db.rows('SELECT * FROM skipped'),
                 'preflight':self.db.get('preflight'),
                 'agreement_preflight':self.db.get('agreement_preflight'),
-                'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled}
+                 'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled,
+                 'dry_run_only':self.s.dry_run_only,
+                 'dry_run':self.db.get('active_dry_run')}

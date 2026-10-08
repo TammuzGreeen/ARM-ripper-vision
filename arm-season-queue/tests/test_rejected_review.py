@@ -59,6 +59,23 @@ class RejectedReviewTests(unittest.TestCase):
         self.assertEqual(row['status'], 'ready')
         self.assertEqual(self.controller.db.rejections(), [])
 
+    def test_completion_after_ttl_without_expiry_sweep_stays_expired_and_ineligible(self):
+        event = self.controller.begin_event('camera')
+        self.controller.db.execute('UPDATE events SET created=? WHERE id=?',
+                                   (time.time()-self.controller.s.ttl-1,event))
+        result = self.passing_result()
+        self.controller.recognition_done(event, result)
+        row = self.controller.db.rows('SELECT status,body FROM events WHERE id=?',(event,))[0]
+        body = json.loads(row['body'])
+        self.assertEqual(row['status'],'expired')
+        self.assertEqual(body['matches'],[])
+        self.assertEqual(body['recognition_lifecycle']['reason'],
+                         'capture_expired_before_recognition_completed')
+        self.assertEqual(body['result'],result)
+        self.assertEqual(body['result']['runs'][MODEL_ORDER[0]]['transcription'],'machine text')
+        self.assertEqual(self.controller.db.rejections(),[])
+        self.assertEqual(self.controller.db.rows('SELECT * FROM reservations'),[])
+
     def rejected_event(self, *, operational=False):
         event = self.controller.begin_event('camera')
         result = self.passing_result()

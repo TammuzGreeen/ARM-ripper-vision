@@ -38,6 +38,7 @@ These variables record an operator-performed compatibility check; the applicatio
 | Completion limitations | `naming.py::_move_track` skips missing files and leaves source filename fields unchanged | Independently check each required output using saved naming preview + final `job.path` |
 | Source DVD titles | `TrackInfoProcessor` retains MakeMKV title ID, duration, aspect, FPS, chapters/size; it does not persist original DVD title/angle mapping | Never infer DVD-title number as MakeMKV ID + 1; use evidenced explicit maps |
 | Source stream inventory | `SINFO` handler retains limited video data; track detail does not expose complete audio/subtitle inventory or chapters | Supply independently evidenced source inventory in the masterlist |
+| Drive scan/tray close endpoints | `POST /drives/{id}/scan` starts `rescan_drive.sh`, which launches ARM processing when a disc is present; tray close via `POST /drives/{id}/eject` also starts that wrapper | Never use either endpoint for an info-only dry run. A separate host-side MakeMKV helper uses the direct tray ioctl and the `info` subcommand only. |
 
 The job config PATCH handler also changes process-global configuration. This companion deliberately does **not** call it. Configure the tested settings once in ARM, while idle, rather than letting one job change unrelated jobs' settings.
 

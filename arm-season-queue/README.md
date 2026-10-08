@@ -79,6 +79,57 @@ Global pause applies to that ARM instance, including unrelated new jobs, so use 
 5. Present the printed disc face (or relevant cover/insert) with title, season, disc and edition visible. In agreement mode, wait for both recognizers and the approved-list match. If rejected, do not insert: use Manual Review and either leave it rejected or complete the explicit fresh-capture human-review path below. Captures expire after 180 seconds by default. For a passing automatic capture, remove it from view and insert it into ARM; the association is retained if OCR finishes after insertion.
 6. Watch rip and publication independently. A FileFlows delivery can finish while the next disc is being ripped. A different unprocessed disc in the same season uses its own entry, not the next position.
 
+## Supervised production-like dry run
+
+For qualification without media output, run a separate local deployment with
+`DRY_RUN_ONLY=true`, `FILEFLOWS_ENABLED=false`, and a local
+`DRY_RUN_OUTPUT_ROOT` (for example `/srv/local-ssd/test/<disc>/completed`).
+This execution-boundary setting blocks batch activation, queue actions, human
+dispatch authorizations, reservation polling, and ARM start/configuration. It
+does not edit ARM's global pause. The dry-run record is separate from production
+reservations and does not mark episodes complete.
+
+Use the GUI's **Production-like dry run** panel. It starts a fresh record; after
+you clear the camera/tray and calibrate the empty view, the existing automatic
+three-frame camera pipeline runs against approved masterlists. A human correction
+is stored separately and cannot change masterlist mappings or bypass scan and
+readiness blockers. Attach a report made by the host-side
+`scripts/dry_run_info_scan.py` helper. That helper verifies ARM's global pause,
+empty job state, and persistent MakeMKV `+sel:all` stream policy, closes the
+selected tray by a kernel ioctl, waits a bounded
+time for media readiness, and runs only `makemkvcon -r info` with a 600-second
+default hard timeout in a networkless,
+read-only scanner container. It never calls ARM's `/drives/{id}/scan` endpoint:
+the inspected ARM implementation launches processing from that route (and its
+tray-close API also invokes the processing wrapper). Give the helper a private
+report directory and the persistent MakeMKV configuration mounted read-only.
+The private report is stamped with the fresh camera event UUID; the helper
+monitors drive media-change state, ARM pause/job state and ARM worker processes,
+and aborts on replacement or concurrent ARM processing.
+
+The GUI reconciles the actual MakeMKV title IDs, DVD titles/angles where
+reported, durations, chapters, sizes, per-title streams, approved mapping and
+the ordinary ARM plan/filename logic. Every filename and full local destination
+is marked **would be created**; the read-only queue media mount is not written.
+Only after reviewing the capture, recognition, correction, scan, blockers and
+proposed files can the operator save **Test successful** or **Needs changes**.
+Neither choice dispatches work. The final plan always reports
+`ready_for_ripping: false`.
+
+Example host invocation (adjust local paths/container names; never store the
+report, config, keys or capture in Git):
+
+```sh
+python3 scripts/dry_run_info_scan.py \
+  --arm-api http://127.0.0.1:18080/api/v1 \
+  --arm-container <local-arm-container> \
+  --makemkv-image <qualified-scan-only-image> \
+  --makemkv-config /path/to/private/MakeMKV-config \
+  --report-dir /path/to/private/dry-run-reports \
+  --capture-event <fresh-camera-event-uuid> \
+  --confirm-physical-disc
+```
+
 If an insertion cannot be paired, the job remains held. Present again, then use the event's **Confirm evidence** once, with the waiting ARM job ID and a short evidence note. Uploaded single photos require review; duplicating one photo never counts as independent-frame consensus. **Recapture** re-arms detection; first remove the previous item and wait for local OCR to finish.
 
 ### Agreement-only rip authorization and rejected discs

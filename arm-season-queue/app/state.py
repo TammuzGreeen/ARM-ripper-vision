@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -36,6 +37,14 @@ class Store:
               drive TEXT NOT NULL, job INTEGER, review_status TEXT NOT NULL,
               ejection_status TEXT NOT NULL, body TEXT NOT NULL);
             ''')
+        os.chmod(path, 0o600)
+        # SQLite sidecars inherit database permissions on creation; tighten any
+        # already-created files as well.
+        for suffix in ('-wal', '-shm'):
+            try:
+                os.chmod(str(path) + suffix, 0o600)
+            except FileNotFoundError:
+                pass
 
     @contextmanager
     def connect(self):
@@ -67,25 +76,27 @@ class Store:
     def put(self, key, value):
         self.execute('INSERT OR REPLACE INTO kv VALUES (?,?)', (key, encode(value)))
 
-    def new_event(self, source='camera'):
+    def new_event(self, source='camera', *, isolated=False):
         event = str(uuid4())
         with self.connect() as db:
-            # A new, possibly unreadable presentation invalidates old unused evidence.
-            old_rejections = list(db.execute("""SELECT r.id,r.body FROM rejected_rips r
-                JOIN events e ON e.id=r.event
-                WHERE e.job IS NULL AND e.status IN ('ready','rejected_for_review')"""))
-            for rejection in old_rejections:
-                body = json.loads(rejection['body'])
-                body.setdefault('audit_trail', []).append({
-                    'at': time.time(), 'action': 'prior_presentation_superseded',
-                    'detail': 'A new presentation arrived before this rejected item was inserted; prior unpaired evidence, including failed ejections, cannot claim the new insertion.',
-                })
-                body.setdefault('ejection', {})['status'] = 'superseded_before_insertion'
-                db.execute("UPDATE rejected_rips SET ejection_status='superseded_before_insertion',body=? WHERE id=?",
-                           (encode(body), rejection['id']))
-                db.execute("UPDATE events SET status='invalidated' WHERE id=(SELECT event FROM rejected_rips WHERE id=?) AND job IS NULL",
-                           (rejection['id'],))
-            db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ('processing','ready','review','rejected_for_review')")
+            if not isolated:
+                # A new production presentation supersedes only ordinary queue
+                # evidence. Dry-run evidence uses an isolated audit namespace.
+                old_rejections = list(db.execute("""SELECT r.id,r.body FROM rejected_rips r
+                    JOIN events e ON e.id=r.event
+                    WHERE e.job IS NULL AND e.status IN ('ready','rejected_for_review')"""))
+                for rejection in old_rejections:
+                    body = json.loads(rejection['body'])
+                    body.setdefault('audit_trail', []).append({
+                        'at': time.time(), 'action': 'prior_presentation_superseded',
+                        'detail': 'A new presentation arrived before this rejected item was inserted; prior unpaired evidence, including failed ejections, cannot claim the new insertion.',
+                    })
+                    body.setdefault('ejection', {})['status'] = 'superseded_before_insertion'
+                    db.execute("UPDATE rejected_rips SET ejection_status='superseded_before_insertion',body=? WHERE id=?",
+                               (encode(body), rejection['id']))
+                    db.execute("UPDATE events SET status='invalidated' WHERE id=(SELECT event FROM rejected_rips WHERE id=?) AND job IS NULL",
+                               (rejection['id'],))
+                db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ('processing','ready','review','rejected_for_review')")
             db.execute('INSERT INTO events(id,created,status,body) VALUES (?,?,?,?)',
                        (event, time.time(), 'processing', encode({'source': source})))
         return event

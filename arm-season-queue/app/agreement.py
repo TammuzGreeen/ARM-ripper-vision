@@ -25,8 +25,13 @@ PRIMARY_MODEL = "qwen3-vl:30b-a3b-instruct-q4_K_M"
 SECONDARY_MODEL = "qwen2.5vl:7b-q8_0"
 MODEL_ORDER = (PRIMARY_MODEL, SECONDARY_MODEL)
 PROMPT = (
-    "Transcribe only the readable text visibly printed in this image. Preserve the original language and line breaks. "
-    "Do not infer missing text. Return only the transcription, or an empty string if no text is readable."
+    "Read this as a DVD or Blu-ray disc label. Return separate plain-text lines for the visible fields: "
+    "Series/title:, Season:, Disc:, Printed episodes/range:, and Edition/version:. "
+    "Do not omit a legible field; copy its original-language marker and exact names/numbers, "
+    "and include episode titles only when printed. Omit a field if it is not readable; never infer, "
+    "translate, normalize, or repeat text. Ignore ratings, copyright or rights notices, age classifications, "
+    "catalog/barcode codes, credits, decorative slogans, and repeated legal text. "
+    "Return at most 12 short lines."
 )
 # Three full camera crops require >7k prompt tokens for the secondary Qwen VL tag.
 # Keep all three independent frames at original configured resolution; do not

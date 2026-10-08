@@ -125,11 +125,14 @@ class Camera:
             original = self.full_frame.copy() if self.full_frame is not None else image.copy()
             event = self.begin('manual_test')
             evidence = self.s.state/'evidence'/event
-            evidence.mkdir(parents=True, exist_ok=True)
+            evidence.mkdir(parents=True, exist_ok=True, mode=0o700)
+            evidence.chmod(0o700)
             if not cv2.imwrite(str(evidence/'original.jpg'), original, [cv2.IMWRITE_JPEG_QUALITY, 95]):
                 raise ValueError('Could not retain the original camera capture')
+            (evidence/'original.jpg').chmod(0o600)
             if not cv2.imwrite(str(evidence/'0.jpg'), image, [cv2.IMWRITE_JPEG_QUALITY, 95]):
                 raise ValueError('Could not retain the cropped camera view')
+            (evidence/'0.jpg').chmod(0o600)
             self.status['message'] = 'Original and cropped snapshot saved; recognition has not started'
             return event
 
@@ -344,17 +347,21 @@ class Camera:
         vision = self.s.recognition_backend != 'tesseract'
         try:
             evidence = self.s.state/'evidence'/event
-            evidence.mkdir(parents=True, exist_ok=True)
+            evidence.mkdir(parents=True, exist_ok=True, mode=0o700)
+            evidence.chmod(0o700)
             for i, frame in enumerate(images):
                 path = evidence/f'{i}.jpg'
                 if not preserve_existing and not cv2.imwrite(str(path), frame):
                     raise RuntimeError('Could not retain camera evidence')
+                if not preserve_existing:
+                    path.chmod(0o600)
                 # Retain evidence before recognition, including on server failure.
                 results.append({'evidence':f'{event}/{i}.jpg'})
                 if original_images and i < len(original_images):
                     original_path = evidence/'original.jpg' if len(images) == 1 else evidence/f'original-{i}.jpg'
                     if not cv2.imwrite(str(original_path), original_images[i], [cv2.IMWRITE_JPEG_QUALITY, 95]):
                         raise RuntimeError('Could not retain the original camera capture')
+                    original_path.chmod(0o600)
             if self.s.recognition_backend == 'ollama-agreement' and not test_only:
                 result = recognize_agreement(self.s, images, event, self.get_masters())
                 result['frames'] = results

@@ -42,6 +42,8 @@ class Settings:
     password: str = os.getenv('QUEUE_PASSWORD', '')
     switch_policy: str = os.getenv('BATCH_SWITCH_POLICY', 'review')
     fileflows_enabled: bool = env_bool('FILEFLOWS_ENABLED', True)
+    dry_run_only: bool = env_bool('DRY_RUN_ONLY', False)
+    dry_run_output_root: str = os.getenv('DRY_RUN_OUTPUT_ROOT', '/media/completed')
 
     def __post_init__(self):
         if self.recognition_backend not in ('tesseract', 'ollama', 'ollama-agreement', 'llamacpp', 'openai-compatible'):

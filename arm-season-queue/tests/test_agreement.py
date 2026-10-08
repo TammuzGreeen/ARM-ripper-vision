@@ -1,6 +1,6 @@
 import unittest
 
-from app.agreement import MODEL_ORDER, OPTIONS, evaluate
+from app.agreement import MODEL_ORDER, OPTIONS, PROMPT, evaluate
 from test_core import master
 
 
@@ -9,6 +9,12 @@ class AgreementGateTests(unittest.TestCase):
         self.assertEqual(OPTIONS['num_ctx'], 8192)
         self.assertEqual(OPTIONS['num_predict'], 1536)
         self.assertEqual(OPTIONS['num_gpu'], 0)
+
+    def test_transcription_prompt_focuses_disc_identity_and_avoids_repeated_fine_print(self):
+        for phrase in ('Series/title:', 'Season:', 'Disc:', 'Printed episodes/range:', 'episode titles',
+                       'Ignore ratings', 'repeated legal text', 'at most 12 short lines'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, PROMPT)
 
     def transcript(self, *, disc=1, season=2, episodes='1-4', edition='Teil 1'):
         titles = '\n'.join(episode.title for episode in master().discs[disc - 1].episodes)

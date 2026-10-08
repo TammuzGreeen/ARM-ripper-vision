@@ -1,5 +1,45 @@
 # Verification and qualification
 
+## Local dry-run-only preparation (2026-10-08)
+
+The companion now has a separate dry-run review record, MakeMKV info-output
+parser, per-title inventory reconciliation, and a proposal screen using the
+same `app.arm.plan` title-selection/readiness/filename logic as a normal queue
+plan. It has an execution-boundary `DRY_RUN_ONLY` mode: batch activation,
+actions, human dispatch authorization, and reservation polling are blocked.
+Camera evidence is attached to the separate dry-run record and is not released
+for production insertion pairing. The final plan is always `ready_for_ripping:
+false`; assessments persist on the dry-run record only.
+
+The host-side scanner helper is deliberately separate from the queue and has no
+media-output mount or network. It verifies the local ARM global pause and empty
+job state, closes the drive by kernel ioctl, waits a bounded time for a ready
+data medium, and invokes only MakeMKV `info`. ARM's actual critical sources
+match the inspected reference. `POST /drives/{id}/scan` starts the processing
+wrapper, and the tray-close API also triggers that wrapper, so neither route is
+used. The host drive watcher is inactive and no matching host udev rule was
+found at preparation time. ARM remains globally paused; MakeMKV's persistent
+`app_DefaultSelectionString` is `+sel:all`; the configured local staging and
+completed paths are on ext4. FileFlows is disabled.
+
+The live camera preview shows the physical open optical tray in the camera's
+field of view and a label-up DVD can be read in that position. No separate
+automatic transfer mechanism is present or assumed. The preview frame was a
+temporary diagnostic, not the dry-run's fresh retained capture. No dry-run has
+been started; no fresh recognition or optical scan has run for this requested
+workflow, and no media output was created. The camera currently needs empty-view
+calibration before the fresh presentation. Physical tray closure, the current
+disc's readability, scan parsing against the fresh medium, the GUI proposal,
+and the assessment remain outstanding.
+
+The active application suite passes **148 tests** in a network-isolated Linux
+container, including dry-run parsing/planning, scan inventory and mapping
+conflict blockers, excluded titles, database privacy, same-capture association,
+non-pairing, no-reservation behavior, and a dry-run tick that does not query ARM
+or mutate production state. This test result does not qualify the physical
+camera, optical drive, MakeMKV scanner helper on the present medium, or ARM's
+pause-database failure behavior.
+
 ## GUI/masterlist update (2026-10-08)
 
 The active application suite passes **134 tests** in the rebuilt Linux image,
