@@ -4,6 +4,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 
+def env_bool(name, default=True):
+    value = os.getenv(name)
+    return default if value is None else value.casefold() in ('1', 'true', 'yes', 'on')
+
+
 @dataclass(frozen=True)
 class Settings:
     state: Path = Path(os.getenv('STATE_DIR', '/state'))
@@ -36,6 +41,7 @@ class Settings:
     user: str = os.getenv('QUEUE_USER', 'operator')
     password: str = os.getenv('QUEUE_PASSWORD', '')
     switch_policy: str = os.getenv('BATCH_SWITCH_POLICY', 'review')
+    fileflows_enabled: bool = env_bool('FILEFLOWS_ENABLED', True)
 
     def __post_init__(self):
         if self.recognition_backend not in ('tesseract', 'ollama', 'ollama-agreement', 'llamacpp', 'openai-compatible'):

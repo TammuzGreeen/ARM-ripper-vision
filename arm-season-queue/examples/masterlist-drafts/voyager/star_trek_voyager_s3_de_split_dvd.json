@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "star_trek_voyager_s3_de_split_dvd",
   "series": "Star Trek: Voyager",
   "season": 3,
@@ -27,8 +27,8 @@
   "unresolved": [
     "Disc-to-episode placement is based on supplied physical insert photographs and checked release-specific online listings.",
     "Library numbering is kept distinct from printed physical numbering where they differ.",
-    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "A technical scan has not established the expected distinct source-title count.",
+    "Technical source-title ordering has not been established by a disc scan.",
     "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
   ],
   "discs": [
@@ -61,8 +61,8 @@
         "DISC 1: EPISODEN 1-4"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -95,8 +95,8 @@
         "DISC 2: EPISODEN 5-8"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -129,8 +129,8 @@
         "DISC 3: EPISODEN 9-12"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -163,8 +163,8 @@
         "DISC 4: EPISODEN 13-16"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -197,8 +197,8 @@
         "DISC 5: EPISODEN 17-20"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -231,8 +231,8 @@
         "DISC 6: EPISODEN 21-24"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -255,8 +255,8 @@
         "DISC 7: EPISODEN 25-26"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     }

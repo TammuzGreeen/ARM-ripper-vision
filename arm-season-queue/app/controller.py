@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import re
 import threading
 import time
@@ -64,6 +65,35 @@ class Controller:
         self.db.invalidate_pending(include_rejections=True)
         self.initialized = True
 
+    def readiness(self):
+        if self.s.arm_url:
+            arm = self.arm.inspect()
+        else:
+            arm = {'ready':False,'issues':['ARM_URL is not configured'],'version':None,
+                   'drives':[],'ripping_enabled':None}
+        if self.s.recognition_backend == 'ollama-agreement':
+            models = agreement_preflight(self.s)
+        else:
+            models = {'ready':False,'issues':['Automatic workflow requires the two-model agreement backend'],
+                      'models':{},'ollama_version':None}
+        self.db.put('preflight',arm)
+        self.db.put('agreement_preflight',models)
+        storage = {}
+        for name, path, writable in (('state',self.s.state,True),('queue_media',self.s.media,False),
+                                     ('handover',self.s.handover,self.s.fileflows_enabled)):
+            try:
+                fs=os.statvfs(path)
+                storage[name]={'available':path.is_dir(),'writable':os.access(path,os.W_OK),
+                               'required_writable':writable,'free_bytes':fs.f_bavail*fs.f_frsize}
+            except OSError:
+                storage[name]={'available':False,'writable':False,'required_writable':writable,'free_bytes':0}
+        storage_issues=[f'{name} storage is unavailable' for name,item in storage.items() if not item['available']]
+        storage_issues += [f'{name} storage is not writable' for name,item in storage.items()
+                           if item['required_writable'] and not item['writable']]
+        return {'arm':arm,'models':models,'storage':storage,'storage_issues':storage_issues,
+                'camera_mode':self.s.camera_mode,'fileflows_enabled':self.s.fileflows_enabled,
+                'ready':bool(arm.get('ready') and models.get('ready') and not storage_issues)}
+
     def activate(self, master_id):
         with self.lock:
             if self.s.recognition_backend != 'ollama-agreement':
@@ -127,7 +157,8 @@ class Controller:
     def human_retry_authorized(recognition):
         review = (recognition or {}).get('review') or {}
         matches = (recognition or {}).get('matches') or []
-        return (review.get('authority') == 'explicit-human-confirmation-of-fresh-capture'
+        return (review.get('authority') in ('explicit-human-confirmation-of-fresh-capture',
+                                            'human-confirmed-associated-insertion')
                 and review.get('capture_event') == (recognition or {}).get('event_id')
                 and review.get('masterlist_sha256')
                 and len(matches) == 1
@@ -167,7 +198,7 @@ class Controller:
             return False
         if metadata.get('titles'):
             supplied_titles = {normalize_printed(value) for value in re.split(r'\s*[,;\n]\s*', str(metadata['titles'])) if value.strip()}
-            expected_titles = {normalize_printed(episode.title) for episode in disc.episodes}
+            expected_titles = {normalize_printed(episode.title) for episode in disc.episodes if episode.title}
             if supplied_titles != expected_titles:
                 return False
         if metadata.get('disc_number'):
@@ -252,7 +283,10 @@ class Controller:
             self._ensure_rejection(event, result)
 
     def _ensure_rejection(self, event, result, *, job=None, drive=None):
-        """Persist original machine evidence before any ARM cancel/eject call."""
+        """Persist original model evidence separately from human-entered corrections."""
+        event_rows = self.db.rows('SELECT job FROM events WHERE id=?', (event,))
+        if event_rows and job is None:
+            job = event_rows[0]['job']
         runs = result.get('runs') or {}
         agreement = result.get('agreement') or {}
         body = {
@@ -279,57 +313,89 @@ class Controller:
                 for tag in MODEL_ORDER
             },
             'original_machine_result': result,
-            'manual_correction': None, 'field_sources': {},
-            'ejection': {'status': 'pending' if job is not None else 'awaiting_disc', 'error': None},
+            'manual_correction': None, 'correction_history': [], 'field_sources': {},
+            'ejection': {'status': 'not_requested', 'error': None},
             'audit_trail': [{'at': time.time(), 'action': 'rejection_created',
                              'source': 'model_agreement_gate', 'reason': result.get('reason')}],
         }
         row = self.db.add_rejection(event, drive or self.s.drive, body, job=job)
         if job is not None and row['job'] is None:
-            row_body = row['body'] if isinstance(row['body'], dict) else json.loads(row['body'])
-            row_body.setdefault('ejection', {})['status'] = 'pending'
-            self.db.update_rejection(row['id'], job=job, ejection_status='pending', body=row_body)
+            self.db.update_rejection(row['id'], job=job, ejection_status='not_requested')
         return row
 
     def save_rejection_review(self, rejection_id, metadata, status='corrected'):
-        allowed = {'series', 'season', 'episodes', 'titles', 'edition', 'disc_number', 'notes'}
+        allowed = {'series', 'season', 'episodes', 'titles', 'edition', 'disc_number',
+                   'optical_title', 'selected_content', 'versions', 'notes'}
         if not isinstance(metadata, dict) or set(metadata) - allowed:
             raise ValueError('Unsupported manual metadata fields')
         if status not in ('reviewed', 'corrected'):
             raise ValueError('Review status must be reviewed or corrected')
         if status == 'corrected' and not all(str(metadata.get(k, '')).strip() for k in ('series', 'season', 'episodes')):
             raise ValueError('Corrected metadata requires series, season, and episodes')
-        row = self.db.rejection(rejection_id)
-        if not row:
-            raise ValueError('Rejected-rip record not found')
-        body = row['body']
-        now = time.time()
-        manual = {key: value for key, value in metadata.items()}
-        body['manual_correction'] = {'fields': manual, 'saved_at': now, 'authority': 'human_verified'}
-        body['reviewer_timestamp'] = now
-        body['final_metadata'] = dict(manual)
-        body['field_sources'] = {key: 'human_verified' for key in manual}
-        body.setdefault('audit_trail', []).append({'at': now, 'action': 'metadata_corrected' if status == 'corrected' else 'reviewed',
-                                                   'source': 'human_verified', 'fields': sorted(manual)})
-        self.db.update_rejection(rejection_id, review_status=status, body=body)
-        return self.db.rejection(rejection_id)
+        with self.lock:
+            row = self.db.rejection(rejection_id)
+            if not row:
+                raise ValueError('Rejected-rip record not found')
+            body = row['body']
+            event_rows = self.db.rows('SELECT body FROM events WHERE id=?', (row['event'],))
+            event_body = json.loads(event_rows[0]['body']) if event_rows else {}
+            prior_auth = event_body.get('review') or {}
+            if prior_auth.get('authority') in ('explicit-human-confirmation-of-fresh-capture',
+                                                'human-confirmed-associated-insertion'):
+                if self.db.rows('SELECT 1 FROM reservations WHERE event=?', (row['event'],)):
+                    raise ValueError('Correction is already bound to a reservation; resolve that job before editing')
+                event_body.pop('review', None)
+                event_body['matches'] = []
+                event_body.setdefault('result', {}).pop('review', None)
+                event_body['result']['matches'] = []
+                self.db.execute("UPDATE events SET body=?,status='rejected_for_review',released=0 WHERE id=?",
+                                (encode(event_body), row['event']))
+                body.setdefault('audit_trail', []).append({'at': time.time(), 'action': 'prior_human_authorization_revoked_by_correction_edit',
+                                                            'revision': len(body.get('correction_history', [])) + 1})
+            now = time.time()
+            manual = {key: value for key, value in metadata.items()}
+            revision = {'fields': manual, 'saved_at': now, 'authority': 'human_verified',
+                        'revision': len(body.setdefault('correction_history', [])) + 1}
+            body['manual_correction'] = revision
+            body['correction_history'].append(revision)
+            body['reviewer_timestamp'] = now
+            body['final_metadata'] = dict(manual)
+            body['field_sources'] = {key: 'human_verified' for key in manual}
+            body.setdefault('audit_trail', []).append({'at': now, 'action': 'metadata_corrected' if status == 'corrected' else 'reviewed',
+                                                       'source': 'human_verified', 'fields': sorted(manual),
+                                                       'revision': revision['revision']})
+            self.db.update_rejection(rejection_id, review_status=status, body=body)
+            return self.db.rejection(rejection_id)
 
     def resolve_rejection(self, rejection_id, status='resolved'):
         if status not in ('resolved', 'ignored'):
             raise ValueError('Status must be resolved or ignored')
-        row = self.db.rejection(rejection_id)
-        if not row:
-            raise ValueError('Rejected-rip record not found')
-        body = row['body']
-        if status == 'resolved' and not body.get('final_metadata'):
-            raise ValueError('Save reviewed or corrected metadata before resolving this item')
-        now = time.time()
-        body.setdefault('audit_trail', []).append({'at': now, 'action': status,
-                                                   'source': 'operator',
-                                                   'final_metadata': body.get('final_metadata')})
-        body['reviewer_timestamp'] = now
-        self.db.update_rejection(rejection_id, review_status=status, body=body)
-        return self.db.rejection(rejection_id)
+        with self.lock:
+            row = self.db.rejection(rejection_id)
+            if not row:
+                raise ValueError('Rejected-rip record not found')
+            body = row['body']
+            if status == 'resolved' and not body.get('final_metadata'):
+                raise ValueError('Save reviewed or corrected metadata before resolving this item')
+            event_rows = self.db.rows('SELECT body FROM events WHERE id=?', (row['event'],))
+            event_body = json.loads(event_rows[0]['body']) if event_rows else {}
+            review = event_body.get('review') or {}
+            if review.get('authority') in ('explicit-human-confirmation-of-fresh-capture',
+                                           'human-confirmed-associated-insertion'):
+                if self.db.rows('SELECT 1 FROM reservations WHERE event=?', (row['event'],)):
+                    raise ValueError('Authorized correction is already bound to a reservation; resolve that job first')
+                event_body.pop('review', None);event_body['matches'] = []
+                event_body.setdefault('result', {}).pop('review', None);event_body['result']['matches'] = []
+                self.db.execute("UPDATE events SET body=?,status='rejected_for_review',released=0 WHERE id=?",
+                                (encode(event_body), row['event']))
+                body.setdefault('audit_trail', []).append({'at': time.time(), 'action': 'prior_human_authorization_revoked_by_resolution'})
+            now = time.time()
+            body.setdefault('audit_trail', []).append({'at': now, 'action': status,
+                                                       'source': 'operator',
+                                                       'final_metadata': body.get('final_metadata')})
+            body['reviewer_timestamp'] = now
+            self.db.update_rejection(rejection_id, review_status=status, body=body)
+            return self.db.rejection(rejection_id)
 
     def review_event(self, event, master_id, disc_id, note, job=None):
         if not note.strip():
@@ -340,36 +406,55 @@ class Controller:
                 raise ValueError('Select an approved masterlist and its disc')
             with self.db.connect() as db:
                 row = db.execute('SELECT * FROM events WHERE id=?',(event,)).fetchone()
-                if not row or row['status'] not in ('ready','review','rejected_for_review'):
+                if not row or row['status'] not in ('ready','review','rejected_for_review','expired'):
                     raise ValueError('This event cannot be reviewed; capture again')
                 body = json.loads(row['body'])
                 existing_review = body.get('review') or {}
-                if existing_review.get('authority') == 'explicit-human-confirmation-of-fresh-capture':
+                if existing_review.get('authority') in ('explicit-human-confirmation-of-fresh-capture',
+                                                       'human-confirmed-associated-insertion'):
                     raise ValueError('This human retry authorization is single-use; capture and review a new event instead')
                 if body.get('source') in ('manual_test','vision_test') or body.get('result',{}).get('test_only'):
                     raise ValueError('Manual test snapshots cannot authorize ripping; make a fresh automatic capture')
                 if not body.get('result',{}).get('frames'):
                     raise ValueError('No retained frame available; recapture')
-                is_rejected_retry = row['status'] == 'rejected_for_review'
+                rejected_rows = list(db.execute('SELECT id,review_status,body FROM rejected_rips WHERE event=?', (event,)))
+                is_rejected_retry = row['status'] in ('rejected_for_review','expired') and body.get('source') == 'camera'
+                associated_insertion = bool(is_rejected_retry and row['job'] is not None)
                 if is_rejected_retry:
-                    if row['job'] is not None or job is not None or body.get('source') != 'camera':
-                        raise ValueError('A rejected retry must be explicitly confirmed on a fresh, unpaired camera capture before insertion')
-                    if time.time() - row['created'] > self.s.ttl:
-                        raise ValueError('Rejected capture expired; take a fresh camera capture before retry authorization')
-                    rejected_rows = list(db.execute('SELECT id,review_status,body FROM rejected_rips WHERE event=?', (event,)))
                     if len(rejected_rows) != 1:
                         raise ValueError('Rejected capture audit record is missing or ambiguous')
                     rejection_body = json.loads(rejected_rows[0]['body'])
                     correction = rejection_body.get('final_metadata') or {}
                     if (rejected_rows[0]['review_status'] != 'corrected'
                             or not self._correction_matches_disc(correction, master, next(d for d in master.discs if d.id==disc_id))):
-                        raise ValueError('Save a corrected identification matching this approved masterlist disc before retry authorization')
-                    self.arm.held()
-                    drives = self.arm.call('GET', '/drives').get('drives', [])
-                    configured = [drive for drive in drives if drive.get('mount') == self.s.drive]
-                    if (len(configured) != 1 or configured[0].get('drive_mode') != 'auto'
-                            or configured[0].get('job_id_current') is not None):
-                        raise ValueError('Retry authorization requires the configured auto drive to be idle under ARM global pause')
+                        raise ValueError('Save a corrected identification matching this approved masterlist disc before continuing')
+                    if associated_insertion:
+                        if job not in (None, row['job']):
+                            raise ValueError('This correction is bound to a different ARM insertion')
+                        target_job = row['job']
+                        detail = self.arm.detail(target_job)
+                        seen = db.execute('SELECT identity FROM seen WHERE job=?',(target_job,)).fetchone()
+                        if (not seen or job_identity(detail['job']) != seen['identity']
+                                or detail['job'].get('devpath') != self.s.drive
+                                or detail['job'].get('status') != 'manual_paused'
+                                or detail['job'].get('manual_start')):
+                            raise ValueError('The same insertion is no longer verifiably waiting in ARM; remove/re-present and insert a fresh disc')
+                        self.arm.held()
+                        drives = self.arm.call('GET','/drives').get('drives',[])
+                        configured = [drive for drive in drives if drive.get('mount') == self.s.drive]
+                        if (len(configured) != 1 or configured[0].get('drive_mode') != 'auto'
+                                or configured[0].get('job_id_current') != target_job):
+                            raise ValueError('ARM no longer associates this waiting job with the configured drive; review needs a fresh insertion')
+                        job = target_job
+                    else:
+                        if row['job'] is not None or job is not None or time.time() - row['created'] > self.s.ttl:
+                            raise ValueError('Rejected capture expired or is not a fresh, unpaired camera capture; present and insert a fresh disc')
+                        self.arm.held()
+                        drives = self.arm.call('GET','/drives').get('drives',[])
+                        configured = [drive for drive in drives if drive.get('mount') == self.s.drive]
+                        if (len(configured) != 1 or configured[0].get('drive_mode') != 'auto'
+                                or configured[0].get('job_id_current') is not None):
+                            raise ValueError('Fresh-capture confirmation requires the configured auto drive to be idle under ARM global pause')
                 target = job if job is not None else row['job']
                 if job is not None:
                     detail = self.arm.detail(job)
@@ -383,8 +468,13 @@ class Controller:
                             raise ValueError('Job already reserved; resolve its reservation first')
                         db.execute("UPDATE events SET job=NULL,status='invalidated' WHERE id=?",(prior['id'],))
                 match_row = {'master':master_id,'disc':disc_id,'confidence':None,'masterlist_sha256':digest(master)}
-                review = {'note':note,'at':time.time(),'authority':'explicit-human-confirmation-of-fresh-capture' if is_rejected_retry else 'human-confirmed physical evidence',
+                authority = ('human-confirmed-associated-insertion' if associated_insertion
+                             else 'explicit-human-confirmation-of-fresh-capture' if is_rejected_retry
+                             else 'human-confirmed physical evidence')
+                review = {'note':note,'at':time.time(),'authority':authority,
                           'capture_event':event,'master':master_id,'disc':disc_id,'masterlist_sha256':digest(master)}
+                if is_rejected_retry:
+                    review['correction_revision'] = (rejection_body.get('manual_correction') or {}).get('revision')
                 body.setdefault('result', {})['review'] = review
                 body['result']['matches'] = [match_row]
                 body['result']['event_id'] = event
@@ -392,13 +482,26 @@ class Controller:
                 db.execute("UPDATE events SET body=?,status='ready',job=?,released=1 WHERE id=?",(encode(body),target,event))
                 if is_rejected_retry:
                     rejection_body.setdefault('audit_trail', []).append({
-                        'at': review['at'], 'action': 'fresh_capture_human_retry_authorized',
+                        'at': review['at'], 'action': 'human_corrections_confirmed_for_associated_insertion' if associated_insertion else 'fresh_capture_human_retry_authorized',
                         'source_event': event, 'master': master_id, 'disc': disc_id,
                         'masterlist_sha256': digest(master), 'note': note,
                     })
-                    rejection_body.setdefault('ejection', {})['status'] = 'human_retry_authorized'
-                    db.execute("UPDATE rejected_rips SET ejection_status='human_retry_authorized',body=? WHERE id=?",
-                               (encode(rejection_body), rejected_rows[0]['id']))
+                    rejection_body.setdefault('ejection', {})['status'] = 'not_requested'
+                    db.execute("UPDATE rejected_rips SET job=?,ejection_status='not_requested',body=? WHERE id=?",
+                               (job,
+                                 encode(rejection_body), rejected_rows[0]['id']))
+
+    def human_authorization_current(self, event, result):
+        review = (result or {}).get('review') or {}
+        if review.get('authority') not in ('explicit-human-confirmation-of-fresh-capture',
+                                           'human-confirmed-associated-insertion'):
+            return True
+        rows = self.db.rows('SELECT review_status,body FROM rejected_rips WHERE event=?', (event,))
+        if len(rows) != 1 or rows[0]['review_status'] != 'corrected':
+            return False
+        body = json.loads(rows[0]['body'])
+        revision = (body.get('manual_correction') or {}).get('revision')
+        return bool(revision and revision == review.get('correction_revision'))
 
     def action(self, action, job=None, disc=None):
         with self.lock:
@@ -492,10 +595,12 @@ class Controller:
         if current:
             detail = self.arm.detail(current)
             self.db.pair_insertion(current,job_identity(detail['job']),self.s.ttl)
-            rejected = self.db.rows("SELECT r.* FROM rejected_rips r JOIN events e ON e.id=r.event WHERE e.job=? AND r.ejection_status IN ('pending','awaiting_disc')", (current,))
+            rejected = self.db.rows("SELECT r.* FROM rejected_rips r JOIN events e ON e.id=r.event WHERE e.job=? AND r.review_status NOT IN ('resolved','ignored')", (current,))
             if rejected:
-                self.reject_inserted(rejected[0], drive, current)
-                return
+                # Keep the same ARM insertion under the existing global pause.
+                # A human may correct this event and explicitly continue; setup
+                # must not cancel/eject a disc merely because models disagreed.
+                pass
         batch_rows = self.db.rows('SELECT * FROM batches WHERE id=?',(self.db.get('active_batch',''),))
         running = batch_rows and batch_rows[0]['state']=='running'
         if running:
@@ -506,13 +611,13 @@ class Controller:
                 paired = self.db.rows("SELECT * FROM events WHERE job=? AND status='ready'",(current,))
                 if paired and not self.db.rows('SELECT 1 FROM reservations WHERE job=?',(current,)):
                     self.reserve(paired[0],batch_rows[0],detail)
-        for reservation in self.db.rows("SELECT * FROM reservations WHERE state NOT IN ('failed','cancelled','review') OR publication='pending' AND state='ripped'"):
+        for reservation in self.db.rows("SELECT * FROM reservations WHERE state NOT IN ('failed','cancelled','review') OR publication IN ('pending','failed') AND state='ripped'"):
             try:
                 self.advance(reservation,bool(running),current)
             except Exception as exc:
                 # Preserve a newly persisted start intent across a transport error. Next tick reconciles ARM.
                 keep_start = reservation['state']=='reserved'
-                self.db.execute("UPDATE reservations SET state=CASE WHEN state='ripped' OR (state='starting' AND ?) THEN state ELSE 'review' END,error=? WHERE job=?",(keep_start,str(exc),reservation['job']))
+                self.db.execute("UPDATE reservations SET state=CASE WHEN state='ripped' OR (state='starting' AND ?) THEN state ELSE 'review' END,publication=CASE WHEN state='ripped' AND publication IN ('pending','failed') THEN 'failed' ELSE publication END,error=? WHERE job=?",(keep_start,str(exc),reservation['job']))
 
     def reject_inserted(self, row, drive, job):
         """Stop an unauthorized waiting ARM job, then request tray ejection via ARM."""
@@ -563,6 +668,10 @@ class Controller:
         if detail['job']['status']!='manual_paused':
             return
         body = json.loads(event['body'])
+        if not self.human_authorization_current(event['id'], body.get('result')):
+            body['result']['reason'] = 'Human correction changed or was resolved after authorization; confirm the current correction again'
+            self.db.execute("UPDATE events SET status='review',released=0,body=? WHERE id=?", (encode(body),event['id']))
+            return
         if not (self.agreement_authorized(body.get('result')) or self.human_retry_authorized(body.get('result'))):
             body['result'] = body.get('result') or {}
             body['result']['reason'] = 'Stored recognition does not contain a complete exact-model agreement proof; automatic rip blocked'
@@ -629,6 +738,8 @@ class Controller:
             return
         if row['state']=='reserved' and running and current==job and row['batch']==self.db.get('active_batch'):
             saved_result = (payload.get('recognition') or {}).get('result')
+            if not self.human_authorization_current(row['event'], saved_result):
+                raise ValueError('Human correction changed or was resolved after reservation; rip start blocked')
             if not (self.agreement_authorized(saved_result) or self.human_retry_authorized(saved_result)):
                 raise ValueError('Stored recognition lacks exact-model agreement or explicit fresh-capture human authorization; rip start blocked')
             if structure(detail)!=payload['structure_signature']:
@@ -662,8 +773,13 @@ class Controller:
                 source = base/PurePosixPath(rendered['rendered_folder'])/(rendered['rendered_title']+'.mkv')
                 relative = str(source.relative_to(prefix))
                 path = beneath(self.s.media,relative)
-                checked = inspect_file(path,disc.inventory.model_dump(),entry['scan_duration'])
-                outputs.append(dict(entry,arm_output_path=str(source),media_relative_path=relative,**checked))
+                # A pre-upgrade reservation has no output-level inventory. Preserve
+                # its legacy disc-default semantics while new plans persist the
+                # effective per-title inventory explicitly.
+                inventory = entry.get('inventory',disc.inventory.model_dump())
+                checked = inspect_file(path,inventory,entry['scan_duration'])
+                outputs.append(dict(entry,inventory=inventory,arm_output_path=str(source),
+                                    media_relative_path=relative,**checked))
             # Recheck authoritative terminal state after reading every file.
             terminal = self.arm.detail(job)
             if terminal['job']['status']!='success' or job_identity(terminal['job'])!=payload['identity']:
@@ -675,14 +791,23 @@ class Controller:
                 'observed_label':payload['observed_label'],'structure_signature':payload['structure_signature'],
                 'source_titles':payload['source_titles'],'source_inventory':disc.inventory.model_dump(),
                 'outputs':outputs,'library_root_hint':'LIBRARY_HOST configuration', 'preserve_sources':True}
-            publish_json(self.s.handover/'ready'/f'{job}.json',manifest)
-            self.db.execute("UPDATE reservations SET state='ripped',error='' WHERE job=?",(job,))
+            if self.s.fileflows_enabled:
+                publish_json(self.s.handover/'ready'/f'{job}.json',manifest)
+            else:
+                manifest['handoff_status'] = 'disabled_for_local_test'
+                publish_json(self.s.state/'finished'/f'{job}.json',manifest)
+            publication = 'pending' if self.s.fileflows_enabled else 'disabled'
+            self.db.execute("UPDATE reservations SET state='ripped',publication=?,error='' WHERE job=?",(publication,job))
         except Exception as exc:
             self.db.execute("UPDATE reservations SET state='review',error=? WHERE job=?",(str(exc),row['job']))
 
     def read_ack(self,row):
+        if not self.s.fileflows_enabled:
+            return
         path = self.s.handover/'acks'/f"{row['job']}.json"
         if not path.exists():
+            if not self.s.fileflows_enabled and row['publication'] == 'pending':
+                self.db.execute("UPDATE reservations SET publication='disabled' WHERE job=?",(row['job'],))
             return
         ack = json.loads(path.read_text('utf-8'))
         manifest = json.loads((self.s.handover/'ready'/f"{row['job']}.json").read_text('utf-8'))
@@ -721,10 +846,41 @@ class Controller:
         for r in reservations:
             body = json.loads(r.pop('body'))
             r['mapping']=body['mapping']
+            r['masterlist']=body.get('masterlist')
+            r['recognition']=body.get('recognition')
+            r['arm_start_acknowledged']=bool(body.get('start_request_acknowledged_at'))
+            r['naming_preview']=body.get('naming_preview')
+            manifest_path=((self.s.handover/'ready') if self.s.fileflows_enabled else
+                           (self.s.state/'finished'))/f"{r['job']}.json"
+            if manifest_path.is_file():
+                try:
+                    manifest=json.loads(manifest_path.read_text('utf-8'))
+                    r['finished_summary']={key:manifest.get(key) for key in
+                        ('status','arm_status','recognition_event','recognition','outputs','errors','disc_id')}
+                except (OSError,ValueError):
+                    r['finished_summary']={'status':'manifest_unreadable'}
+            else:
+                r['finished_summary']=None
         batches = self.db.rows('SELECT * FROM batches')
         for b in batches:
             b['master']=json.loads(b['master'])
+        storage = {}
+        for name, path, writable in (('state', self.s.state, True),
+                                     ('queue_media', self.s.media, False),
+                                     ('handover', self.s.handover, self.s.fileflows_enabled)):
+            try:
+                stat = path.stat()
+                fs = os.statvfs(path)
+                storage[name] = {'available': path.is_dir(), 'writable': bool(os.access(path, os.W_OK)),
+                                 'required_writable': writable,
+                                 'free_bytes': fs.f_bavail * fs.f_frsize,
+                                 'device': stat.st_dev}
+            except OSError:
+                storage[name] = {'available': False, 'writable': False,
+                                 'required_writable': writable, 'free_bytes': 0}
         return {'controller':self.status,'active_batch':self.db.get('active_batch'),
                 'masters':[m.model_dump() for m in self.masters()], 'events':events,'batches':batches,
                 'reservations':reservations,'skipped':self.db.rows('SELECT * FROM skipped'),
-                'preflight':self.db.get('preflight')}
+                'preflight':self.db.get('preflight'),
+                'agreement_preflight':self.db.get('agreement_preflight'),
+                'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled}

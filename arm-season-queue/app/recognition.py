@@ -4,6 +4,7 @@ import unicodedata
 from collections import Counter
 
 from .formats import digest
+from .text_normalization import normalize_structural_labels
 
 
 def normalize(text):
@@ -17,13 +18,14 @@ def printed_range(value):
 
 
 def extract(text, confidence=0.0, barcodes=None):
-    seasons = {int(v) for v in re.findall(r'\b(?:season|staffel|saison)\s*[:.#-]?\s*(\d{1,2})\b', text, re.I)}
-    discs = {int(v) for v in re.findall(r'\b(?:disc|disk|dvd|disque)\s*[:.#-]?\s*(\d{1,2})\b', text, re.I)}
+    label_text = normalize_structural_labels(text)
+    seasons = {int(v) for v in re.findall(r'\bseason\s*[:.#-]?\s*(\d{1,2})\b', label_text, re.I)}
+    discs = {int(v) for v in re.findall(r'\bdisc\s*[:.#-]?\s*(\d{1,2})\b', label_text, re.I)}
     episodes = []
     for match in re.finditer(r'\bS(\d{1,2})E(\d{1,3})(?:\s*[-–]\s*(?:S\d{1,2})?E?(\d{1,3}))?\s*[-–:]?\s*([^\n]*)', text, re.I):
         seasons.add(int(match[1]))
         episodes.append({'season': int(match[1]), 'first': int(match[2]), 'last': int(match[3] or match[2]), 'title': match[4].strip()})
-    for match in re.finditer(r'\b(?:episodes?|folgen?)\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?\s*[-–:]?\s*([^\n]*)', text, re.I):
+    for match in re.finditer(r'\bepisode\s*(\d{1,3})(?:\s*[-–]\s*(\d{1,3}))?\s*[-–:]?\s*([^\n]*)', label_text, re.I):
         episodes.append({'season': None, 'first': int(match[1]), 'last': int(match[2] or match[1]), 'title': match[3].strip()})
     return {'raw_text': text, 'confidence': round(confidence, 3),
             'season': next(iter(seasons)) if len(seasons) == 1 else None,
@@ -132,5 +134,4 @@ def match(result, masters):
                                 'masterlist_sha256':digest(master),
                                 'confidence': min(f['confidence'] for f in good)})
     return matches
-
 

@@ -44,6 +44,7 @@ services:
       CAPTURE_TTL_SECONDS: ${CAPTURE_TTL_SECONDS:-180}
       EVIDENCE_RETENTION_DAYS: ${EVIDENCE_RETENTION_DAYS:-30}
       BATCH_SWITCH_POLICY: ${BATCH_SWITCH_POLICY:-review}
+      FILEFLOWS_ENABLED: ${FILEFLOWS_ENABLED:-true}
     volumes:
       - ${STATE_HOST:?Choose a new persistent state directory}:/state
       - ${HANDOVER_HOST:?Choose a handover directory}:/handover

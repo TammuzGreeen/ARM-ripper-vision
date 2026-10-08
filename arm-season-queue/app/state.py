@@ -147,6 +147,8 @@ class Store:
             candidates = list(db.execute("SELECT id,status FROM events WHERE job IS NULL AND status IN ('processing','ready','rejected_for_review') AND created>=? AND created<=? AND released=1", (now-ttl, now)))
             if len(candidates) == 1:
                 db.execute('UPDATE events SET job=? WHERE id=?', (job, candidates[0]['id']))
+                db.execute('UPDATE rejected_rips SET job=? WHERE event=? AND job IS NULL',
+                           (job, candidates[0]['id']))
             else:
                 db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ('processing','ready','rejected_for_review')")
                 for candidate in candidates:

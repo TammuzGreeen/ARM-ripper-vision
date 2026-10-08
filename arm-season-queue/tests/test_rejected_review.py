@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import time
+from dataclasses import replace
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -123,7 +124,7 @@ class RejectedReviewTests(unittest.TestCase):
         self.assertEqual(ready['status'], 'ready')
         event_body = json.loads(ready['body'])
         self.assertTrue(self.controller.human_retry_authorized(event_body['result']))
-        self.assertEqual(self.controller.db.rejection(rejection['id'])['ejection_status'], 'human_retry_authorized')
+        self.assertEqual(self.controller.db.rejection(rejection['id'])['ejection_status'], 'not_requested')
         self.assertEqual(self.controller.db.rows('SELECT * FROM reservations'), [])
         with self.assertRaisesRegex(ValueError, 'single-use'):
             self.controller.review_event(event, self.master.id, 'disc-1', 'Attempt to relink', job=48)
@@ -149,6 +150,139 @@ class RejectedReviewTests(unittest.TestCase):
             self.controller.advance(reservation, True, job)
         arm_call.assert_called_once_with('POST', f'/jobs/{job}/start')
         self.assertEqual(self.controller.db.rows('SELECT state FROM reservations WHERE job=?', (job,))[0]['state'], 'ripping')
+
+    def test_confirmed_correction_keeps_same_verified_insertion_and_survives_restart(self):
+        event=self.rejected_event()
+        rejection=self.controller.db.rejections('pending')[0]
+        metadata={'series':self.master.series,'season':str(self.master.season),'episodes':'1-4',
+                  'titles':', '.join(ep.title for ep in self.master.discs[0].episodes),
+                  'edition':self.master.edition_name,'disc_number':'1'}
+        saved=self.controller.save_rejection_review(rejection['id'],metadata)
+        original=saved['body']['original_machine_result']
+        self.assertEqual(len(saved['body']['correction_history']),1)
+        job=481
+        detail={'job':{'job_id':job,'start_time':'2026-01-01T00:00:00','devpath':self.controller.s.drive,
+                       'source_type':'disc','label':'EU_103539','status':'manual_paused','manual_start':False},
+                'tracks':[{'track_id':800+i,'track_number':str(i),'length':2610+i,
+                           'fps':25,'aspect_ratio':'4:3'} for i in range(4)]}
+        self.controller.release_event(event)
+        self.controller.db.pair_insertion(job,job_identity(detail['job']),self.controller.s.ttl)
+        with patch.object(self.controller.arm,'held'), \
+             patch.object(self.controller.arm,'detail',return_value=detail), \
+             patch.object(self.controller.arm,'call',return_value={'drives':[{
+                 'mount':self.controller.s.drive,'drive_mode':'auto','job_id_current':job}]}), \
+             patch.object(self.controller.arm,'cancel_waiting') as cancel, \
+             patch.object(self.controller.arm,'eject_drive') as eject:
+            self.controller.review_event(event,self.master.id,'disc-1','Compared held disc with its label',job=job)
+        cancel.assert_not_called();eject.assert_not_called()
+        event_row=self.controller.db.rows('SELECT job,status,body FROM events WHERE id=?',(event,))[0]
+        self.assertEqual((event_row['job'],event_row['status']),(job,'ready'))
+        self.assertEqual(json.loads(event_row['body'])['review']['authority'],'human-confirmed-associated-insertion')
+        restarted=type(self.controller)(self.controller.s)
+        self.addCleanup(restarted.validation.shutdown,wait=True)
+        retained=restarted.db.rejection(rejection['id'])['body']
+        self.assertEqual(retained['original_machine_result'],original)
+        self.assertEqual(retained['final_metadata'],metadata)
+        self.assertEqual(restarted.db.rows('SELECT job,status FROM events WHERE id=?',(event,)),
+                         [{'job':job,'status':'ready'}])
+
+    def test_editing_correction_after_confirmation_revokes_authorization(self):
+        event=self.rejected_event();rejection=self.controller.db.rejections('pending')[0]
+        metadata={'series':self.master.series,'season':str(self.master.season),'episodes':'1-4',
+                  'titles':', '.join(ep.title for ep in self.master.discs[0].episodes),
+                  'edition':self.master.edition_name,'disc_number':'1'}
+        self.controller.save_rejection_review(rejection['id'],metadata)
+        job=483
+        detail={'job':{'job_id':job,'start_time':'2026-01-01T00:00:00','devpath':self.controller.s.drive,
+                       'source_type':'disc','label':'EU_103539','status':'manual_paused','manual_start':False},
+                'tracks':[]}
+        self.controller.release_event(event);self.controller.db.pair_insertion(job,job_identity(detail['job']),self.controller.s.ttl)
+        with patch.object(self.controller.arm,'held'),patch.object(self.controller.arm,'detail',return_value=detail), \
+             patch.object(self.controller.arm,'call',return_value={'drives':[{'mount':self.controller.s.drive,
+                    'drive_mode':'auto','job_id_current':job}]}):
+            self.controller.review_event(event,self.master.id,'disc-1','Confirmed physical label',job=job)
+        self.controller.save_rejection_review(rejection['id'],dict(metadata,series='Different Series'))
+        row=self.controller.db.rows('SELECT status,released,body FROM events WHERE id=?',(event,))[0]
+        self.assertEqual((row['status'],row['released']),('rejected_for_review',0))
+        self.assertFalse(json.loads(row['body']).get('review'))
+
+    def test_resolving_after_confirmation_revokes_unreserved_authorization(self):
+        event=self.rejected_event();rejection=self.controller.db.rejections('pending')[0]
+        metadata={'series':self.master.series,'season':str(self.master.season),'episodes':'1-4'}
+        self.controller.save_rejection_review(rejection['id'],metadata)
+        job=484;detail={'job':{'job_id':job,'start_time':'2026-01-01T00:00:00','devpath':self.controller.s.drive,
+                               'source_type':'disc','label':'EU_103539','status':'manual_paused','manual_start':False},'tracks':[]}
+        self.controller.release_event(event);self.controller.db.pair_insertion(job,job_identity(detail['job']),self.controller.s.ttl)
+        with patch.object(self.controller.arm,'held'),patch.object(self.controller.arm,'detail',return_value=detail), \
+             patch.object(self.controller.arm,'call',return_value={'drives':[{'mount':self.controller.s.drive,
+                    'drive_mode':'auto','job_id_current':job}]}):
+            self.controller.review_event(event,self.master.id,'disc-1','Confirmed physical label',job=job)
+        self.controller.resolve_rejection(rejection['id'])
+        row=self.controller.db.rows('SELECT status,released,body FROM events WHERE id=?',(event,))[0]
+        self.assertEqual((row['status'],row['released']),('rejected_for_review',0))
+        self.assertFalse(json.loads(row['body']).get('review'))
+
+    def test_correction_cannot_change_after_execution_reservation(self):
+        event=self.rejected_event();rejection=self.controller.db.rejections('pending')[0]
+        metadata={'series':self.master.series,'season':str(self.master.season),'episodes':'1-4'}
+        self.controller.save_rejection_review(rejection['id'],metadata)
+        job=485;detail={'job':{'job_id':job,'start_time':'2026-01-01T00:00:00','devpath':self.controller.s.drive,
+                               'source_type':'disc','label':'EU_103539','status':'manual_paused','manual_start':False},'tracks':[]}
+        self.controller.release_event(event);self.controller.db.pair_insertion(job,job_identity(detail['job']),self.controller.s.ttl)
+        with patch.object(self.controller.arm,'held'),patch.object(self.controller.arm,'detail',return_value=detail), \
+             patch.object(self.controller.arm,'call',return_value={'drives':[{'mount':self.controller.s.drive,
+                    'drive_mode':'auto','job_id_current':job}]}):
+            self.controller.review_event(event,self.master.id,'disc-1','Confirmed physical label',job=job)
+        self.controller.db.claim(job,'batch','disc-1',event,{'test_only':True})
+        with self.assertRaisesRegex(ValueError,'already bound to a reservation'):
+            self.controller.save_rejection_review(rejection['id'],dict(metadata,series='Changed'))
+
+    def test_waiting_recognition_rejection_is_held_for_review_not_auto_ejected(self):
+        event=self.rejected_event();self.controller.release_event(event)
+        job=482;detail={'job':{'job_id':job,'start_time':'2026-01-01T00:00:00','devpath':self.controller.s.drive,
+                               'source_type':'disc','label':'EU_103539','status':'manual_paused','manual_start':False},
+                        'tracks':[]}
+        self.controller.db.pair_insertion(job,job_identity(detail['job']),self.controller.s.ttl)
+        self.controller.initialized=True
+        with patch.object(self.controller.arm,'jobs',return_value=[]), \
+             patch.object(self.controller.arm,'call',return_value={'drives':[{
+                 'mount':self.controller.s.drive,'drive_mode':'auto','job_id_current':job}]}), \
+             patch.object(self.controller.arm,'detail',return_value=detail), \
+             patch.object(self.controller.arm,'cancel_waiting') as cancel, \
+             patch.object(self.controller.arm,'eject_drive') as eject:
+            self.controller.tick()
+        cancel.assert_not_called();eject.assert_not_called()
+        self.assertEqual(self.controller.db.rows('SELECT job,status FROM events WHERE id=?',(event,)),
+                         [{'job':job,'status':'rejected_for_review'}])
+
+    def test_fileflows_disabled_keeps_finished_manifest_in_private_state_only(self):
+        root=Path(self.temp.name)/'local-finished';state=root/'state';media=root/'media';handover=root/'handover'
+        media.mkdir(parents=True);handover.mkdir(parents=True)
+        settings=replace(self.controller.s,state=state,media=media,handover=handover,fileflows_enabled=False)
+        controller=type(self.controller)(settings);self.addCleanup(controller.validation.shutdown,wait=True)
+        output=media/'job'/'Disc1'/'Title.mkv';output.parent.mkdir(parents=True);output.write_bytes(b'fixture')
+        event='local-event';job=586;master=self.master
+        arm_job={'job_id':job,'start_time':'2026-01-01T00:00:00','devpath':settings.drive,
+                 'source_type':'disc','status':'success','path':'/home/arm/media/job'}
+        detail={'job':arm_job,'tracks':[{'track_id':80,'track_number':'0','ripped':True}]}
+        payload={'masterlist':master.model_dump(),'masterlist_sha256':digest(master),'identity':job_identity(arm_job),
+                 'mapping':[{'arm_track_id':80,'makemkv_id':0,'scan_duration':10,'inventory':master.discs[0].inventory.model_dump(),
+                             'destination':'tv/Test/Season 01/Test.mkv'}],
+                 'naming_preview':{'tracks':[{'track_number':'0','rendered_folder':'Disc1','rendered_title':'Title'}]},
+                 'recognition':{'result':{}},'observed_label':'fixture','structure_signature':'fixture',
+                 'source_titles':detail['tracks']}
+        controller.db.execute("INSERT INTO reservations(job,batch,disc,event,state,publication,body,error) VALUES(?,?,?,?,?,?,?,?)",
+                              (job,'batch','disc-1',event,'validating','pending',json.dumps(payload),'') )
+        with patch('app.controller.inspect_file',return_value={'sha256':'a'*64,'validation':{'decode':'passed'}}), \
+             patch.object(controller.arm,'detail',return_value=detail):
+            controller.finish({'job':job,'batch':'batch','disc':'disc-1','event':event},detail)
+        row=controller.db.rows('SELECT state,publication FROM reservations WHERE job=?',(job,))[0]
+        self.assertEqual(row,{'state':'ripped','publication':'disabled'})
+        self.assertTrue((state/'finished'/f'{job}.json').is_file())
+        self.assertFalse((handover/'ready'/f'{job}.json').exists())
+        (handover/'acks').mkdir(parents=True);(handover/'acks'/f'{job}.json').write_text('{}')
+        controller.read_ack({'job':job,'batch':'batch','publication':'disabled'})
+        self.assertEqual(controller.db.rows('SELECT publication FROM reservations WHERE job=?',(job,))[0]['publication'],'disabled')
 
     def test_correction_cannot_be_authorized_for_the_wrong_disc(self):
         event = self.rejected_event()

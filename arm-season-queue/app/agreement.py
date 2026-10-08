@@ -19,6 +19,7 @@ import cv2
 import httpx
 
 from .formats import digest
+from .text_normalization import normalize_structural_labels
 
 PRIMARY_MODEL = "qwen3-vl:30b-a3b-instruct-q4_K_M"
 SECONDARY_MODEL = "qwen2.5vl:7b-q8_0"
@@ -27,7 +28,10 @@ PROMPT = (
     "Transcribe only the readable text visibly printed in this image. Preserve the original language and line breaks. "
     "Do not infer missing text. Return only the transcription, or an empty string if no text is readable."
 )
-OPTIONS = {"temperature": 0, "num_ctx": 4096, "num_predict": 1536, "num_gpu": 0}
+# Three full camera crops require >7k prompt tokens for the secondary Qwen VL tag.
+# Keep all three independent frames at original configured resolution; do not
+# truncate images or weaken the two-model gate to fit a smaller context.
+OPTIONS = {"temperature": 0, "num_ctx": 8192, "num_predict": 1536, "num_gpu": 0}
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 
 
@@ -186,6 +190,9 @@ def _run_model(settings, tag: str, meta: dict, encoded: list[str], evidence_dir:
 
 
 def _parse_text(text: str, masters: list) -> dict:
+    # Normalize field labels only; identity-bearing text is matched against the
+    # untouched transcription below and is never translated.
+    label_text = normalize_structural_labels(text)
     approved = [master for master in masters if master.approved]
     series = set()
     known_editions = {}
@@ -203,17 +210,17 @@ def _parse_text(text: str, masters: list) -> dict:
                     known_identifiers.setdefault((master.id, disc.id), set()).add(normalize(value))
     seasons = {int(a or b or c) for a, b, c in re.findall(
         r"(?i)\b(?:season|temporada|staffel|saison)\s*[:.#-]?\s*(\d{1,2})\b|"
-        r"\b(\d{1,2})\s*\.?\s*(?:season|temporada|staffel|saison)\b|\bS(\d{1,2})E\d{1,3}\b", text
+        r"\b(\d{1,2})\s*\.?\s*(?:season|temporada|staffel|saison)\b|\bS(\d{1,2})E\d{1,3}\b", label_text
     )}
     episode_numbers = set()
     for start, end in re.findall(
-        r"(?i)\b(?:episodes?|episoden?|folgen?|eps?\.?|episode\s+range)\s*[:#]?\s*(\d{1,3})\s*(?:[-–—]\s*(\d{1,3}))?", text
+        r"(?i)\b(?:episode|eps?\.?|episode\s+range)\s*[:#]?\s*(\d{1,3})\s*(?:[-–—]\s*(\d{1,3}))?", label_text
     ):
         first, last = int(start), int(end or start)
         if last < first or last - first > 100:
             continue
         episode_numbers.update(range(first, last + 1))
-    for season, first, last in re.findall(r"(?i)\bS(\d{1,2})E(\d{1,3})(?:\s*[-–—]\s*(?:S\d{1,2})?E?(\d{1,3}))?", text):
+    for season, first, last in re.findall(r"(?i)\bS(\d{1,2})E(\d{1,3})(?:\s*[-–—]\s*(?:S\d{1,2})?E?(\d{1,3}))?", label_text):
         episode_numbers.update(range(int(first), int(last or first) + 1))
         seasons.add(int(season))
     titles = set()
@@ -223,7 +230,7 @@ def _parse_text(text: str, masters: list) -> dict:
                 if _phrase(text, episode.title):
                     titles.add(normalize(episode.title))
     disc_numbers = {int(value) for value in re.findall(
-        r"(?i)\b(?:disc|disk)\s*(?:number\s*)?(?:no\.?\s*)?#?\s*(\d{1,2})\b", text)}
+        r"(?i)\b(?:disc|disk)\s*(?:number\s*)?(?:no\.?\s*)?#?\s*(\d{1,2})\b", label_text)}
     return {"series": sorted(series), "seasons": sorted(seasons),
             "episodes": sorted(episode_numbers), "titles": sorted(titles),
             "disc_numbers": sorted(disc_numbers),

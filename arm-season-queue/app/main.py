@@ -123,9 +123,7 @@ def create_app(settings=None, start_workers=True):
 
     @app.post('/api/preflight')
     def preflight():
-        report = controller.arm.inspect()
-        controller.db.put('preflight',report)
-        return report
+        return controller.readiness()
 
     @app.post('/api/masters')
     async def import_master(request:Request):

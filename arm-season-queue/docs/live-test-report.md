@@ -1,5 +1,34 @@
 # Verification and qualification
 
+## GUI/masterlist update (2026-10-08)
+
+The active application suite passes **134 tests** in the rebuilt Linux image,
+including generated-media validation, four-language structural-label parsing,
+human-correction revision binding, disabled-local-handoff behavior, and import
+checks for all 10 Borgia/Voyager metadata drafts. The drafts now import as v2
+metadata (`approved: false`); 55 discs and 208 episode entries remain blocked
+from ripping because no technical scan-backed mappings/inventories are claimed.
+Voyager S1 Disc 5 is represented as extras-only metadata without invented title
+IDs.
+
+The queue was deployed locally as
+`arm-season-queue:gui-masterlist-20261007`, image
+`sha256:e8ded17f567fc93dc557d6089aef0f316d1362c560263e368bb603343c3ba187`.
+Health and authenticated state/UI asset requests returned HTTP 200. The queue
+has no optical-drive mapping or Docker socket; its camera is the only device,
+ARM media is mounted read-only, and local-test FileFlows handoff is disabled.
+ARM global status was read back as `ripping_enabled=false` and
+there were zero ARM jobs, loaded masters, queue reservations, or rips. Persistent
+state and private deployment configuration were backed up before deployment;
+no database schema migration was performed. No disc was presented or inserted,
+no capture was taken, and no FileFlows processing was invoked. A real browser
+screenshot/viewport inspection was unavailable on this host; responsive CSS and
+served GUI assets were checked, but visual browser rendering is not claimed.
+
+This local deployment check does not qualify camera recognition, physical disc
+association, ARM ripping/recovery, DVD angle selection, NAS/TrueNAS integration,
+FileFlows, or media-library playback. Continue to use manual supervision.
+
 ## Integrated local deployment check (2026-10-07)
 
 The current working branch includes GitHub `main` through draft-publication

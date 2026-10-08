@@ -1,10 +1,15 @@
 import unittest
 
-from app.agreement import MODEL_ORDER, evaluate
+from app.agreement import MODEL_ORDER, OPTIONS, evaluate
 from test_core import master
 
 
 class AgreementGateTests(unittest.TestCase):
+    def test_three_frame_vision_context_is_not_truncated_to_four_k(self):
+        self.assertEqual(OPTIONS['num_ctx'], 8192)
+        self.assertEqual(OPTIONS['num_predict'], 1536)
+        self.assertEqual(OPTIONS['num_gpu'], 0)
+
     def transcript(self, *, disc=1, season=2, episodes='1-4', edition='Teil 1'):
         titles = '\n'.join(episode.title for episode in master().discs[disc - 1].episodes)
         return (f'Star Trek Deep Space Nine\nSeason {season}\nDisc {disc}\n{edition}\n'
@@ -20,6 +25,24 @@ class AgreementGateTests(unittest.TestCase):
         self.assertTrue(result['accepted'])
         self.assertEqual(len(result['matches']), 1)
         self.assertEqual(result['matches'][0]['disc'], 'disc-1')
+
+    def test_episode_range_labels_in_english_german_french_and_spanish_are_equivalent(self):
+        labels = ('Episodes 1-4', 'Episoden 1-4', 'Épisodes 1-4', 'Episodios 1-4')
+        for label in labels:
+            with self.subTest(label=label):
+                text = self.transcript().replace('Episodes 1-4', label)
+                result = self.result(text)
+                self.assertTrue(result['accepted'], result['reasons'])
+
+    def test_localized_season_and_disc_labels_are_parsed(self):
+        variants = (
+            ('Staffel 2', 'Disc 1'), ('Season 2', 'Disk 1'),
+            ('Saison 2', 'Disque 1'), ('Temporada 2', 'Disco 1'),
+        )
+        for season, disc in variants:
+            with self.subTest(season=season, disc=disc):
+                text = self.transcript().replace('Season 2', season).replace('Disc 1', disc)
+                self.assertTrue(self.result(text)['accepted'])
 
     def test_both_models_agree_on_wrong_disc_number_and_wrong_season_reject(self):
         for text in (self.transcript(disc=2), self.transcript(season=3)):
