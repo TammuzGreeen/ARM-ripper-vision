@@ -2,17 +2,18 @@
 
 A Docker companion for ARM Neu with local USB-camera recognition and user-maintained season masterlists.
 
-Optional [Qwen image handoff](arm-season-queue/docs/vision-handoff.md) sends selected
-captures to your configured llama.cpp/Ollama/image API and displays printed identity
-fields for review. Menu capture, subtitle analysis and fingerprint lookup have
-explicit future-extension stubs; they do not run yet. No reference-photo library
-is required, and model observations never modify masterlists or authorize ripping.
+Optional Qwen image handoff sends selected captures to a configured vision API and
+displays printed identity fields for review. The separate opt-in Ollama agreement
+gate uses two exact local model tags; only complete agreement plus one unique match
+to an approved masterlist can authorize an automatic rip. Agreement can still be
+jointly wrong. Human corrections never edit the approved masterlist or authorize a
+rip by themselves. See the active application's agreement and manual-review guide.
 
 **You supply and supplement the masterlist.** The camera adds confidence about the presented medium’s identity and printed contents by checking them against that list. It never creates, supplements or rewrites masterlist entries. Conflicts or uncertain recognition require review.
 
 ## Current implementation
 
-The active Docker application is [arm-season-queue](arm-season-queue/README.md), version 0.1.1. It provides live webcam preview/capture, local OCR/barcode evidence, manual masterlist import/editing, persistent disc/job associations, ARM API metadata assignment and naming previews, and a verified-file handover contract/helper for a separate FileFlows application.
+The active Docker application is [arm-season-queue](arm-season-queue/README.md), version 0.1.1. It provides live webcam preview/capture, local OCR/barcode evidence, manual masterlist import/editing, agreement-gated recognition, rejected-rip review with an explicit human-confirmed retry path, persistent disc/job associations, ARM API metadata assignment and naming previews, and a verified-file handover contract/helper for a separate FileFlows application.
 
 The previous insertion-order-only implementation remains under `arm_ripper_vision/` for migration/reference. Root Compose and Dockerfile now launch the camera companion. The old Python package entry point and Alembic database are legacy; they are not the current Docker runtime. Historical design documents are preserved in [docs/legacy](docs/legacy/).
 
@@ -53,7 +54,7 @@ Supply and approve your masterlist → select a season → present its disc to t
 
 ## Verification and limits
 
-32 companion tests pass, including a generated-media validation/copy/acknowledgement round trip. GitHub Actions builds and smoke-tests the container before publishing. **Physical webcam OCR, real ARM ripping and deployed FileFlows integration have not been qualified.** No direct TrueNAS access was used. No mock ARM service was built. See the [test report](arm-season-queue/docs/live-test-report.md).
+The active companion suite is exercised in the Docker image environment; see the [test report](arm-season-queue/docs/live-test-report.md) for the current result and deployment identity. GitHub Actions builds and smoke-tests the container before publishing. **Physical webcam OCR, real ARM ripping/cancellation/ejection and deployed FileFlows integration have not been qualified.**
 
 The inspected ARM profile normally holds unassigned jobs through companion outage, but its pause-state database-error handling is not strictly fail-closed. That source limitation and ARM restart recovery are documented in the compatibility guide. Do not treat this as a production-qualified deployment.
 

@@ -6,6 +6,7 @@ from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import patch
 
+import cv2
 import numpy as np
 from fastapi.testclient import TestClient
 
@@ -69,6 +70,32 @@ class ManualCameraTests(unittest.TestCase):
             calls[1][2].set_result(None)
         self.assertTrue(all(row['released']==0 for row in self.controller.db.rows('SELECT released FROM events')))
 
+    def test_diagnostic_snapshot_saves_original_without_running_recognition(self):
+        object.__setattr__(self.camera.s, 'recognition_backend', 'ollama')
+        self.camera.calibrate()
+        self.camera.frame[:] = 123
+        with patch.object(self.camera.pool, 'submit') as submit:
+            response = self.post('snapshot')
+        self.assertEqual(response.status_code, 200)
+        submit.assert_not_called()
+        event = response.json()['event']
+        row = self.controller.db.rows('SELECT body,status,job FROM events WHERE id=?', (event,))[0]
+        self.assertEqual(row['status'], 'processing')
+        self.assertIsNone(row['job'])
+        self.assertEqual(json.loads(row['body'])['source'], 'vision_test')
+        evidence = Path(self.app.state.controller.s.state)/'evidence'/event
+        self.assertTrue((evidence/'0.jpg').is_file())
+        self.assertTrue((evidence/'original.jpg').is_file())
+        self.assertEqual(self.client.get(f'/api/evidence/{event}/original.jpg', auth=('operator','test-only')).status_code, 200)
+        (evidence/'qwen-input.jpg').write_bytes(b'private inference image')
+        self.assertEqual(self.client.get(f'/api/evidence/{event}/qwen-input.jpg', auth=('operator','test-only')).content,
+                         b'private inference image')
+        self.controller.db.execute("UPDATE events SET status='invalidated' WHERE id=?", (event,))
+        with patch.object(self.camera, 'transcribe_snapshot', return_value={'text':'printed text','diagnostics':{'kind':'success'}}) as transcribe:
+            response = self.post(f'transcribe/{event}')
+        self.assertEqual(response.status_code, 200)
+        transcribe.assert_called_once_with(event)
+
     def test_stale_disconnected_and_uncalibrated_frames_rejected(self):
         self.assertEqual(self.post('capture').status_code, 400)
         self.camera.calibrate()
@@ -121,13 +148,33 @@ class ManualCameraTests(unittest.TestCase):
             self.camera.run()
         self.assertEqual(self.controller.db.rows('SELECT id FROM events'), [])
 
+    def test_camera_rotation_orients_processing_frame_but_preserves_raw_original(self):
+        settings = Settings(state=Path(self.app.state.controller.s.state), arm_url='',
+                            camera_mode='manual', camera_rotation=180, roi='0,0,1,1')
+        camera = Camera(settings, None, None, None)
+        self.addCleanup(camera.pool.shutdown, wait=True)
+        raw = np.arange(6*8*3, dtype=np.uint8).reshape((6,8,3))
+
+        class Capture:
+            def set(self, *args): pass
+            def read(self): return True, raw.copy()
+            def release(self): pass
+
+        with patch('app.camera.cv2.VideoCapture', return_value=Capture()), \
+             patch.object(camera.stop, 'wait', side_effect=lambda _: camera.stop.set()):
+            camera.run()
+
+        np.testing.assert_array_equal(camera.full_frame, raw)
+        np.testing.assert_array_equal(camera.frame, cv2.rotate(raw, cv2.ROTATE_180))
+        self.assertEqual(camera.snapshot()['rotation_degrees'], 180)
+
     def test_failed_recapture_does_not_invalidate_existing_evidence(self):
         event = self.controller.begin_event('manual_test')
         self.assertEqual(self.post('recapture').status_code, 400)
         self.assertEqual(self.controller.db.rows('SELECT status FROM events WHERE id=?', (event,))[0]['status'], 'processing')
 
     def test_capture_endpoints_require_authentication_and_action_header(self):
-        for endpoint in ('capture', 'mode', 'calibrate'):
+        for endpoint in ('capture', 'snapshot', 'mode', 'calibrate'):
             self.assertEqual(self.client.post('/api/camera/'+endpoint, json={}).status_code, 401)
             self.assertEqual(self.client.post('/api/camera/'+endpoint, json={}, auth=('operator','test-only')).status_code, 403)
 

@@ -54,6 +54,20 @@ class ARM:
         if self.call('GET','/system/ripping-enabled').get('ripping_enabled') is not False:
             raise ValueError('ARM global pause was released; controller stopped assigning jobs')
 
+    def cancel_waiting(self, job):
+        """Cancel only the inspected ARM waiting job; never touch optical devices locally."""
+        detail = self.detail(job)
+        if detail['job'].get('status') != 'manual_paused' or detail['job'].get('manual_start'):
+            raise ValueError('Rejected disc job is no longer safely waiting; eject was not attempted')
+        return self.call('POST', f'/jobs/{job}/cancel')
+
+    def eject_drive(self, drive_id):
+        """Use the source-verified ARM drive API for an explicit tray eject."""
+        if isinstance(drive_id, bool) or not isinstance(drive_id, int) or drive_id < 1:
+            raise ValueError('ARM did not provide a valid drive identifier; eject was not attempted')
+        self.held()
+        return self.call('POST', f'/drives/{drive_id}/eject', {'method': 'eject'})
+
     def detail(self, job):
         return self.call('GET',f'/jobs/{job}/detail')
 

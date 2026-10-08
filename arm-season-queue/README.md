@@ -10,6 +10,8 @@ The adapter currently targets inspected ARM Neu **19.1.0**, reference commit `f6
 
 - Optional [Qwen vision handoff](docs/vision-handoff.md) for webcam/uploaded images, with structured printed series/season/episode observations. Configurable llama.cpp, Ollama or compatible image API; review-only in this iteration. No reference photos required.
 
+- Experimental, separate two-stage OCR/evaluation API for Ollama. The existing direct recognition and benchmark path remains available; the evaluator is audit-only and cannot approve masterlist changes or ripping. See [vision handoff](docs/vision-handoff.md).
+
 - Manual camera testing with explicit **View is empty** and **Capture disc now** controls. Repeat snapshots without restarting; test evidence never authorizes ripping. See [camera controls](docs/camera.md).
 
 - Linux V4L2 USB camera capture, cropped live MJPEG preview, camera status, stable/sharp three-frame capture, local Tesseract German/English OCR, four rotations, local contrast enhancement and optional ZBar barcodes.
@@ -71,13 +73,23 @@ Global pause applies to that ARM instance, including unrelated new jobs, so use 
 ## Normal operation
 
 1. Open `http://<configured-address>:8080`, authenticate, and run **Check ARM connection**.
-2. Import `examples/ds9-season-2-part-1.yaml` in the masterlist editor. Confirm the actual printed edition tokens; remove the masterlist-level unresolved question and set `approved: true`. Disc 1's mappings and source inventory are supplied. Discs 2/3 remain blocked until their own source mappings and inventories are established.
+2. Do not import a file from `examples/masterlist-drafts/` as-is. The published Borgia/Voyager JSON files are evidence drafts with `approved: false`; required technical fields (`expected_title_count`, `order`, and mappings/inventory where needed) are intentionally absent until real-disc scans establish them. Copy a candidate to private storage, preserve its unresolved notes and approval status, and review every mapping before approving. The older DS9 YAML is a separate example, not the Borgia test masterlist.
 3. Clear the camera view and select **Calibrate empty view**. Do this after moving the camera or changing the background/light. Calibration is intentionally required after a camera reconnect or service restart.
 4. Select the season once and start the batch. Existing ARM jobs are baselined and cannot consume a fresh capture automatically.
-5. Present the printed disc face (or relevant cover/insert) with title, season, disc and edition visible. Wait for capture, remove it from view, then insert it into ARM. Captures expire after 180 seconds by default. OCR may finish after insertion; the association is already retained.
+5. Present the printed disc face (or relevant cover/insert) with title, season, disc and edition visible. In agreement mode, wait for both recognizers and the approved-list match. If rejected, do not insert: use Manual Review and either leave it rejected or complete the explicit fresh-capture human-review path below. Captures expire after 180 seconds by default. For a passing automatic capture, remove it from view and insert it into ARM; the association is retained if OCR finishes after insertion.
 6. Watch rip and publication independently. A FileFlows delivery can finish while the next disc is being ripped. A different unprocessed disc in the same season uses its own entry, not the next position.
 
 If an insertion cannot be paired, the job remains held. Present again, then use the event's **Confirm evidence** once, with the waiting ARM job ID and a short evidence note. Uploaded single photos require review; duplicating one photo never counts as independent-frame consensus. **Recapture** re-arms detection; first remove the previous item and wait for local OCR to finish.
+
+### Agreement-only rip authorization and rejected discs
+
+For unattended ripping, set `RECOGNITION_BACKEND=ollama-agreement` and configure `VISION_BASE_URL` for a local Ollama service. Batch activation verifies the exact `qwen3-vl:30b-a3b-instruct-q4_K_M` and `qwen2.5vl:7b-q8_0` tags and their digests. Both models transcribe the retained camera images; only a unique match to an approved user masterlist with complete, agreeing Series, Season, episode/range, and applicable title fields can become rip-eligible. Every other automatic capture—including missing fields, disagreements, malformed output, and runtime failure—is recorded as rejected and cannot be reserved.
+
+When a rejected capture is paired with a newly inserted ARM job, the companion uses only the configured ARM API: it verifies the global pause and that the job is still safely waiting, cancels that waiting job, then requests drive ejection through ARM. If any safety check or API operation fails, the item remains held and the failure is recorded; no local optical-drive access is used. Verify the actual deployed ARM source/API and physical eject behavior before production use. Rejected items and raw model requests/responses are retained in SQLite/evidence and are available in **Rejected Rips / Manual Review**. A saved human correction is marked `human_verified`, preserved separately from both model outputs, and by itself neither starts a rip nor changes the approved masterlist. Resolving an item keeps its audit history; no later disc is automatically matched to it.
+
+To intentionally retry after a correction, first make a **new camera capture** of the re-presented disc. Save a correction on that fresh rejected capture, compare its retained image with the physical disc, then use **Authorize corrected fresh capture** and select the matching approved masterlist/disc before inserting it. This explicit human decision is audited and is a separate authorization path from automatic model agreement. The correction must exactly match the selected approved disc's series, season and episode mapping; supplied title, edition and disc-number corrections are checked too. A prior capture's correction is never copied to the new capture. If the fresh capture is already associated with an insertion or the correction is resolved, stale, mismatched or ambiguous, the manual retry is blocked. If it is authorized, the ordinary global-pause, unique insertion pairing, job identity, title mapping and output-validation checks still apply. Do not use this override without inspecting the fresh image and physical disc.
+
+The agreement-only offline benchmark can be run against the retained dataset with `STATE_DIR=/path/to/queue-state REPORT_DIR=/path/to/private-reports python tools/benchmark_agreement_gate.py`. It validates exact retained requests and independent ground-truth provenance, evaluates retained transcriptions with the production agreement evaluator, and writes a new report revision; it never invokes inference or overwrites prior reports. Keep inputs and reports in private storage outside Git.
 
 Pause stops future configuration/start operations; ongoing ripping and validation continue. Cancel batch likewise preserves already-running work. Cancel waiting job only affects a queue-owned waiting job. Failed physical rips require re-presentation/reinsertion for a new ARM job; retrying a successful but unvalidated rip reruns output checks. An uncertain start response requires inspection and explicit retry, not a blind second start.
 
@@ -88,6 +100,7 @@ Pause stops future configuration/start operations; ongoing ripping and validatio
 - [FileFlows integration and ready/ack contract](docs/fileflows.md)
 - [Masterlist, recognition and association formats](docs/formats.md)
 - [Machine-readable masterlist schema](docs/masterlist.schema.json)
+- [Borgia/Voyager evidence drafts and completeness notes](examples/masterlist-drafts/README.md)
 - [ARM source/API compatibility](docs/compatibility.md)
 - [USB webcam setup and practical recognition limits](docs/camera.md)
 - [Verification results and remaining live tests](docs/live-test-report.md)
@@ -99,4 +112,3 @@ Python 3.12, `pip install -r requirements.txt`, then `python -m unittest discove
 Stop with `docker compose down` (without deleting volumes). Retain state and handover manifests for recovery. Restore only the ARM settings you deliberately changed, while idle; remove global pause only when you intend ARM to return to its ordinary behavior. Rollback does not delete camera evidence, staging media or library files. Keep evidence until successful publication has been checked. Unreferenced evidence expires after the configured retention period; reservations and imported-masterlist provenance protect their evidence indefinitely.
 
 The Python dependency closure is pinned in `requirements.txt`; direct requirements are in `requirements.in`. The base image has a specific version tag. Debian OCR/media packages are resolved during image build, so record the built image digest and `dpkg-query -W` output when qualifying a deployment; the entire OS image is not claimed to be bit-reproducible.
-

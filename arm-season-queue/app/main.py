@@ -15,6 +15,7 @@ from .config import Settings
 from .controller import Controller
 from .formats import Masterlist
 from .handover import beneath
+from .vision import VisionError
 
 
 def create_app(settings=None, start_workers=True):
@@ -22,7 +23,7 @@ def create_app(settings=None, start_workers=True):
     if not settings.password:
         raise ValueError('Set a nonempty QUEUE_PASSWORD before starting the service')
     controller = Controller(settings)
-    camera = Camera(settings,controller.begin_event,controller.recognition_done,controller.release_event)
+    camera = Camera(settings,controller.begin_event,controller.recognition_done,controller.release_event,controller.masters)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -63,6 +64,8 @@ def create_app(settings=None, start_workers=True):
 
     @app.exception_handler(ValueError)
     async def invalid(request, exc):
+        if isinstance(exc, VisionError):
+            return JSONResponse({'detail':str(exc),'diagnostics':exc.diagnostic()},status_code=422)
         return JSONResponse({'detail':str(exc)},status_code=400)
 
     @app.exception_handler(Exception)
@@ -91,6 +94,32 @@ def create_app(settings=None, start_workers=True):
     @app.get('/api/state')
     def state():
         return dict(controller.snapshot(),camera=camera.snapshot())
+
+    @app.get('/api/rejected-rips')
+    def rejected_rips(status: str = 'pending'):
+        try:
+            return {'items': controller.db.rejections(status)}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.get('/api/rejected-rips/{rejection_id}')
+    def rejected_rip(rejection_id: str):
+        row = controller.db.rejection(rejection_id)
+        if not row:
+            raise HTTPException(404)
+        return row
+
+    @app.post('/api/rejected-rips/{rejection_id}/metadata')
+    async def rejected_metadata(rejection_id: str, request: Request):
+        body = json.loads(await limited(request))
+        return await asyncio.to_thread(controller.save_rejection_review, rejection_id,
+                                       body.get('metadata'), body.get('status', 'corrected'))
+
+    @app.post('/api/rejected-rips/{rejection_id}/resolve')
+    async def rejected_resolve(rejection_id: str, request: Request):
+        body = json.loads(await limited(request))
+        return await asyncio.to_thread(controller.resolve_rejection, rejection_id,
+                                       body.get('status', 'resolved'))
 
     @app.post('/api/preflight')
     def preflight():
@@ -124,14 +153,14 @@ def create_app(settings=None, start_workers=True):
     def calibrate():
         with camera.lock:
             camera.calibrate()
-            controller.db.invalidate_pending()
+            controller.db.invalidate_pending(include_rejections=True)
         return {'ok':True}
 
     @app.post('/api/camera/recapture')
     def recapture():
         with camera.lock:
             camera.recapture()
-            controller.db.invalidate_pending()
+            controller.db.invalidate_pending(include_rejections=True)
         return {'ok':True}
 
     @app.post('/api/camera/mode')
@@ -139,12 +168,38 @@ def create_app(settings=None, start_workers=True):
         body = json.loads(await limited(request))
         with camera.lock:
             camera.set_mode(body.get('mode'))
-            controller.db.invalidate_pending()
+            controller.db.invalidate_pending(include_rejections=True)
         return {'ok':True}
 
     @app.post('/api/camera/capture')
     def capture():
         return {'event':camera.capture_manual()}
+
+    @app.post('/api/camera/snapshot')
+    def diagnostic_snapshot():
+        return {'event':camera.capture_snapshot()}
+
+    def require_diagnostic_event(event):
+        rows = controller.db.rows('SELECT body,status,job FROM events WHERE id=?',(event,))
+        if not rows:
+            raise HTTPException(404)
+        body = json.loads(rows[0]['body'])
+        # Diagnostic frames remain reviewable after a later capture invalidates
+        # their eligibility; they can never be linked to an ARM job.
+        if (body.get('source') != 'vision_test'
+                or rows[0]['status'] not in ('processing','invalidated','expired','review')
+                or rows[0]['job'] is not None):
+            raise HTTPException(404)
+
+    @app.post('/api/camera/transcribe/{event}')
+    def diagnostic_transcription(event:str):
+        require_diagnostic_event(event)
+        return camera.transcribe_snapshot(event)
+
+    @app.post('/api/camera/recognize/{event}')
+    def diagnostic_recognition(event:str):
+        require_diagnostic_event(event)
+        return {'event':camera.recognize_snapshot(event),'started':True}
 
     @app.get('/api/camera/preview')
     async def preview():
@@ -163,7 +218,10 @@ def create_app(settings=None, start_workers=True):
 
     @app.get('/api/evidence/{event}/{filename}')
     def evidence(event:str,filename:str):
-        if filename not in ('0.jpg','1.jpg','2.jpg'):
+        if filename not in ('0.jpg','1.jpg','2.jpg','original.jpg','original-0.jpg','original-1.jpg','original-2.jpg','qwen-input.jpg',
+                            'agreement-input-0.jpg','agreement-input-1.jpg','agreement-input-2.jpg',
+                            'agreement-primary-30b-request.json','agreement-primary-30b-stream.jsonl',
+                            'agreement-secondary-7b-request.json','agreement-secondary-7b-stream.jsonl'):
             raise HTTPException(404)
         path = beneath(settings.state/'evidence',event+'/'+filename)
         if not path.is_file():
@@ -186,4 +244,3 @@ def run():
 
 if __name__=='__main__':
     run()
-
