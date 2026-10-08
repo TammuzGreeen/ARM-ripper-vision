@@ -12,7 +12,7 @@ Voyager S1 Disc 5 is represented as extras-only metadata without invented title
 IDs.
 
 The queue was deployed locally as
-`arm-season-queue:gui-masterlist-20261007`, image
+`arm-season-queue:gui-masterlist-20261008`, image
 `sha256:e8ded17f567fc93dc557d6089aef0f316d1362c560263e368bb603343c3ba187`.
 Health and authenticated state/UI asset requests returned HTTP 200. The queue
 has no optical-drive mapping or Docker socket; its camera is the only device,
