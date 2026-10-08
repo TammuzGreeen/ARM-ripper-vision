@@ -64,6 +64,40 @@ For Ollama, see its [image/structured-output documentation](https://docs.ollama.
 No automatic protocol fallback is attempted; a wrong endpoint is reported, not
 silently retried against another server. TLS certificates must validate normally.
 
+## Separate experimental OCR evaluation pipeline
+
+The existing direct-recognition workflow remains available and unchanged:
+
+```text
+image -> selected model -> raw transcription -> benchmark scoring
+```
+
+An opt-in Python API is available in `app.vision_pipeline.run_two_stage_pipeline`:
+
+```text
+image -> qwen2.5vl:3b recognition -> generic quality gates
+      -> optional qwen2.5vl:7b-q8_0 recognition fallback
+      -> separate image-and-transcript evaluator -> structured, audited result
+```
+
+This module is not wired into camera capture, ARM assignment, or ripping. It
+currently requires an Ollama backend. The evaluator receives the original image,
+both raw transcripts when fallback ran, optional caller-supplied context, and a
+generic DVD/video-label field structure. Context is comparison-only and cannot
+fill unreadable text. Deterministic routing flags incomplete output, looping,
+malformed rating-like text and caller-declared missing field groups. These gates
+request another recognition opinion; they never rewrite recognition output.
+
+Every recognition/evaluation request and response can be retained in an evidence
+directory using exclusive file creation and mode 0600. The structured result keeps
+raw outputs, evaluator interpretation, proposed corrections, citations, and
+validation status as separate fields. A quotation from a model transcript is not
+proof of visual truth; image/context-only corrections remain uncertain for
+independent review. The evaluator cannot mutate a masterlist or authorize a rip.
+The direct workflow remains the recommended benchmark mode for adding future
+discs; the two-stage API is a separate experiment, not a one-disc-specific
+production qualification.
+
 ## Data and error handling
 
 Enabling a vision backend opts into transmitting captured/uploaded images to that

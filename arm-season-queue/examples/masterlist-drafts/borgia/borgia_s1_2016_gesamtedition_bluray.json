@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "borgia_s1_2016_gesamtedition_bluray",
   "series": "Borgia",
   "season": 1,
@@ -30,8 +30,8 @@
   "unresolved": [
     "The photographs and checked online sources support the 2016 Studiocanal 8-Blu-ray complete edition identification (EAN 4006680082547).",
     "Episode titles are online enrichment; the photographed Borgia discs print episode ranges but not individual titles.",
-    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "A technical scan has not established the expected distinct source-title count.",
+    "Technical source-title ordering has not been established by a disc scan.",
     "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
   ],
   "discs": [
@@ -73,8 +73,8 @@
         "FSK ab 18"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -116,8 +116,8 @@
         "FSK ab 18"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -159,8 +159,8 @@
         "FSK ab 18"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     }

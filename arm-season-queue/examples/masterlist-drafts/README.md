@@ -1,12 +1,11 @@
 # Borgia and Star Trek: Voyager masterlist drafts
 
-**Evidence drafts, not import-ready or approved ripping configurations.**
+**Importable v2 metadata drafts, not approved or rip-ready configurations.**
 
 These contributor-supplied examples illustrate edition identification, printed
 disc labels, episode assignments, and the distinction between printed and library
-numbering. They can be used for manual metadata comparisons and development of
-draft-handling workflows. The active queue's strict masterlist importer rejects
-them until the missing technical fields are completed.
+numbering. They can be imported for recognition and human review. Missing scan data
+is shown as incomplete execution readiness; it cannot authorize a rip.
 
 | Collection | Seasons | Edition |
 | --- | --- | --- |
@@ -16,7 +15,7 @@ them until the missing technical fields are completed.
 There are 10 season files covering 54 episode-bearing discs and 208 episode
 entries. Combined episodes mean entry counts are not counts of individual episodes
 or verified technical video titles. Voyager season 1's extras-only disc 5 is
-documented but not represented as an episode-bearing disc.
+represented separately from episode-bearing discs.
 
 ## What is and is not verified
 
@@ -26,10 +25,10 @@ preserved; publication does not independently certify every episode assignment.
 Original photographs are private and are not distributed. Personal photo
 filenames and capture dates were removed from the public copies.
 
-All files retain `approved: false`. Validation against the active application
-model at commit `4fe79add8f99c2fc0730fdd8afd0449b6a55a234` reports the expected
-missing `expected_title_count` and `order` fields for all 54 discs. No technical
-title mappings, fingerprints or inventory have been fabricated.
+All files use `schema_version: 2` and retain `approved: false`. Descriptive
+metadata imports without technical fields. No technical title mappings,
+fingerprints or inventory have been fabricated. `completeness_summary.json`
+distinguishes metadata importability from rip readiness.
 
 ## Using these examples
 
@@ -38,13 +37,13 @@ title mappings, fingerprints or inventory have been fabricated.
 2. Copy the relevant season file to your private working directory.
 3. Check the episode assignments and all unresolved notes against your release.
 4. Inspect the actual disc titles with your supported disc-scan workflow. Establish
-   eligible-title count, ordering and any required explicit title mapping. Do not
+   eligible source-title count, ordering and explicit output mappings. Do not
    assume that printed episode count equals technical title count.
 5. Adjust combined/split episode entries as supported by the scan evidence.
-6. Validate against the current [schema](../../docs/masterlist.schema.json) and
-   application validator; resolve blockers and explicitly review before approval.
-7. Only then import for supervised setup testing. Do not bulk-import this draft
-   directory or merely toggle `approved` to bypass review.
+6. Import the draft for metadata/review if useful. Validate against the current
+   [schema](../../docs/masterlist.schema.json); resolve identity questions before
+   approving and technical blockers before execution.
+7. Never merely toggle `approved` or treat metadata importability as rip readiness.
 
 Voyager season 1 uses different printed/library numbering after its combined
 pilot. Season 7 also has ordering differences and a combined finale. Preserve

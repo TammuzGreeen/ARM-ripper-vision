@@ -22,8 +22,9 @@ class MediaTests(unittest.TestCase):
             checked=inspect_file(source,inventory,2)
             self.assertEqual(checked['validation']['decode'],'passed')
             manifest={'schema_version':1,'status':'ready','errors':[],'arm_status':'success','arm_job_id':123,
-                'batch_id':'local-media-test','source_inventory':inventory,
-                'outputs':[dict(checked,media_relative_path='test.mkv',destination='tv/Test/Season 01/Test S01E01.mkv',scan_duration=2)]}
+                # Deliberately distinct disc default: the per-output inventory must win.
+                'batch_id':'local-media-test','source_inventory':dict(inventory,audio=['fra']),
+                'outputs':[dict(checked,inventory=inventory,media_relative_path='test.mkv',destination='tv/Test/Season 01/Test S01E01.mkv',scan_duration=2)]}
             handover=root/'handover';path=handover/'ready'/'123.json';publish_json(path,manifest)
             ack=publish_manifest(path,media,root/'library',handover)
             self.assertEqual(ack['status'],'published')

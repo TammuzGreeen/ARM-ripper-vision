@@ -1,7 +1,7 @@
 FROM python:3.12.10-slim-bookworm
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/state
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu libzbar0 ffmpeg v4l-utils \
+    tesseract-ocr tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-fra tesseract-ocr-spa libzbar0 ffmpeg v4l-utils \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 568 queue && useradd --uid 568 --gid 568 --no-create-home queue
 WORKDIR /app

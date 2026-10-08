@@ -11,6 +11,10 @@ This update makes the prepared camera companion the default Docker runtime. It d
 
 Other deliberate behavior changes: selected titles outside the approved mapping are disabled for that queue-owned job; the new application does not inherit the old unrestricted-extra selection policy. No audio/subtitle streams are pruned by the companion. If extras are needed, establish explicit mappings or process them separately in ARM. The queue reads ARM staging media through a read-only mount for output validation; FileFlows/library publication has a separate write boundary.
 
+## Rejected-disc review and intentional retry
+
+A rejected capture remains in the audit trail when its correction is saved or resolved. For a newly presented disc, save a correction against the exact retained capture and inspect its evidence. If ARM is already holding the associated insertion under global pause, the operator may explicitly confirm the corrected identity against that same still-verifiable job; otherwise authorize a fresh, unpaired camera event before insertion. The correction is bound to a revision: editing/resolving it revokes an unreserved authorization, and a stale/ambiguous insertion requires a new capture. This human-confirmed path is separate from model agreement; no correction silently transfers to another event and the approved masterlist is not rewritten. Scan, mapping, destination and validation checks still apply. See the active application's rejected-rip section for the operator sequence. Held-disc association and physical ARM behavior remain hardware qualification items.
+
 Rollback: stop the queue, retain its state/manifests/media, restore the previous Compose/environment from Git history and the old helper’s separate data. Restore ARM settings only while idle and deliberately manage global pause. Never delete media or replace state files as part of rollback.
 
 Source/API checking, normal restart recovery and the ARM pause-read failure caveat remain mandatory reading in the current setup guide.

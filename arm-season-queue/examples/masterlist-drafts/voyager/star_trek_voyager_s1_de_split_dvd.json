@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "id": "star_trek_voyager_s1_de_split_dvd",
   "series": "Star Trek: Voyager",
   "season": 1,
@@ -27,11 +27,11 @@
   "unresolved": [
     "Disc-to-episode placement is based on supplied physical insert photographs and checked release-specific online listings.",
     "Library numbering is kept distinct from printed physical numbering where they differ.",
-    "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-    "order is required by the schema but is not established by the photographs or checked online release information.",
+    "A technical scan has not established the expected distinct source-title count.",
+    "Technical source-title ordering has not been established by a disc scan.",
     "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred.",
     "Discs 3-4 and their episode titles were completed from the checked STAR TREK DE Season 1, Vol. 2 product listing.",
-    "The split release also contains Disc 5 with Special Features only. The supplied schema requires every Disc to contain at least one episode, so the extras-only Disc 5 cannot be represented as a Disc object without violating the schema.",
+    "Extras-only disc support is now available in v2; Disc 5 is represented below as metadata only, with no scan-backed source-title selection yet.",
     "The physical edition counts the two-part pilot as one printed episode; library numbering counts it as two episodes."
   ],
   "discs": [
@@ -63,8 +63,8 @@
         "DISC 1: EPISODEN 1-3"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -101,8 +101,8 @@
         "DISC 2: EPISODEN 4-7"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -139,8 +139,8 @@
         "DISC 3: EPISODEN 8-11"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
       ]
     },
@@ -177,9 +177,29 @@
         "DISC 4: EPISODEN 12-15"
       ],
       "unresolved": [
-        "expected_title_count is required by the schema but is not established by the photographs or checked online release information.",
-        "order is required by the schema but is not established by the photographs or checked online release information.",
+        "A technical scan has not established the expected distinct source-title count.",
+        "Technical source-title ordering has not been established by a disc scan.",
         "No MakeMKV IDs, DVD title numbers, selection IDs, title_map, structural_signature, or disc-scan inventory were inferred."
+      ]
+    },
+    {
+      "id": "voyager_s1_d5",
+      "number": 5,
+      "episodes": [],
+      "extras": [
+        {
+          "id": "special_features",
+          "title": "Special Features",
+          "provenance": ["Contributor-supplied physical insert evidence and checked release listing; technical scan not available."]
+        }
+      ],
+      "extras_only": true,
+      "expected_title_count": null,
+      "order": null,
+      "selection_ids": [],
+      "title_map": [],
+      "unresolved": [
+        "Technical title scan, selected MakeMKV IDs, output mapping, inventory and filename are not established."
       ]
     }
   ]

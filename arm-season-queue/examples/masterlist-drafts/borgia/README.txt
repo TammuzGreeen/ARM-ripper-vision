@@ -6,7 +6,7 @@ Edition identification:
 - Episode titles were added from checked online episode/release sources.
 
 Status:
-- approved=false
-- NOT import-ready under the supplied schema because Disc.expected_title_count and Disc.order
-  are mandatory but cannot be established without technical disc scans / MakeMKV evidence.
+- schema_version=2; metadata-only drafts are importable for recognition/review.
+- approved=false; execution remains blocked until scan-backed source-title selection,
+  ordering/mapping, inventory and output naming are established per disc.
 - No technical title IDs or structural data were invented.

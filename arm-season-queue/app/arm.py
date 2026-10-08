@@ -1,7 +1,7 @@
 import httpx
 
 from .config import REFERENCE_SHA
-from .formats import destination, digest
+from .formats import digest, output_destination, rip_readiness
 
 
 def enabled(value):
@@ -54,6 +54,20 @@ class ARM:
         if self.call('GET','/system/ripping-enabled').get('ripping_enabled') is not False:
             raise ValueError('ARM global pause was released; controller stopped assigning jobs')
 
+    def cancel_waiting(self, job):
+        """Cancel only the inspected ARM waiting job; never touch optical devices locally."""
+        detail = self.detail(job)
+        if detail['job'].get('status') != 'manual_paused' or detail['job'].get('manual_start'):
+            raise ValueError('Rejected disc job is no longer safely waiting; eject was not attempted')
+        return self.call('POST', f'/jobs/{job}/cancel')
+
+    def eject_drive(self, drive_id):
+        """Use the source-verified ARM drive API for an explicit tray eject."""
+        if isinstance(drive_id, bool) or not isinstance(drive_id, int) or drive_id < 1:
+            raise ValueError('ARM did not provide a valid drive identifier; eject was not attempted')
+        self.held()
+        return self.call('POST', f'/drives/{drive_id}/eject', {'method': 'eject'})
+
     def detail(self, job):
         return self.call('GET',f'/jobs/{job}/detail')
 
@@ -88,7 +102,8 @@ class ARM:
             if track['track_id'] in selected:
                 entry = selected[track['track_id']]
                 ep = entry['episode']
-                payload.update(episode_number=str(ep['number']),episode_name=ep['title'],custom_filename=entry['basename'])
+                payload.update(episode_number=str(ep['number']) if ep else '0',
+                               episode_name=entry['content_name'],custom_filename=entry['basename'])
             self.call('PATCH',f"/jobs/{job}/tracks/{track['track_id']}",payload)
         reread = self.detail(job)
         for track in reread['tracks']:
@@ -117,35 +132,51 @@ def structure(detail):
 
 def plan(master, disc, detail):
     if disc.unresolved:
-        raise ValueError('Masterlist disc needs initial review: '+ '; '.join(disc.unresolved))
-    if not disc.inventory.complete or not disc.inventory.evidence:
-        raise ValueError('Approve the complete source stream inventory before starting this disc')
+        raise ValueError('Masterlist disc needs initial review: ' + '; '.join(disc.unresolved))
     if disc.labels and detail['job'].get('label') not in disc.labels:
         raise ValueError('Scanned label conflicts with the recognised edition; review evidence')
     if disc.structural_signature and structure(detail)!=disc.structural_signature:
         raise ValueError('Disc title structure differs from the approved signature')
-    if not disc.title_map:
+    if master.schema_version == 1 and not disc.title_map:
         raise ValueError('ARM does not expose DVD title numbers; approve an evidenced MakeMKV-to-DVD-title mapping first')
+    readiness = rip_readiness(master, disc)
+    if readiness:
+        raise ValueError('Disc is metadata-only or technically incomplete: ' + '; '.join(readiness))
     tracks = {int(t['track_number']):t for t in detail['tracks']}
     if len(tracks)!=len(detail['tracks']):
         raise ValueError('Duplicate source title IDs')
     eligible = disc.selection_ids or list(tracks)
-    if len(eligible)!=disc.expected_title_count or set(eligible)!={t.makemkv_id for t in disc.title_map}:
-        raise ValueError('Unexpected eligible title count; explicit selection required when extras exist')
+    if (len(set(eligible))!=disc.expected_title_count
+            or set(eligible)!={t.makemkv_id for t in disc.title_map}):
+        raise ValueError('Scanned source-title count/selection does not match the explicit scan-backed output mapping')
     if not set(eligible).issubset(tracks):
         raise ValueError('Required source title is missing')
+    if len({item.makemkv_id for item in disc.title_map}) != len(disc.title_map):
+        raise ValueError('ARM API cannot create multiple outputs from one MakeMKV title; split angles/versions need separately selectable source titles')
     result = []
     for item in disc.title_map:
+        inventory = disc.inventory_for(item)
+        if not inventory.complete or not inventory.evidence:
+            raise ValueError(f'Approve the complete source stream inventory for MakeMKV ID {item.makemkv_id} before starting this disc')
         track = tracks[item.makemkv_id]
         if not 0 < track['length'] <= 99998:
             raise ValueError('Title length outside the supported per-title ripping range')
-        ep = disc.episodes[item.episode_index]
-        dest = destination(master,ep)
+        ep = disc.episodes[item.episode_index] if item.episode_index is not None else None
+        extra = next((extra for extra in disc.extras if extra.id == item.extra_id),None) if item.extra_id else None
+        content_name = ep.title if ep else (item.output_name or extra.title if extra else None)
+        dest = output_destination(master,disc,item)
         # ARM's filename sanitizer is stricter than the destination filesystem.
         # A short ASCII staging name avoids edition/title punctuation changing the preview.
-        basename = f'ASQ-S{master.season:02d}-D{disc.number:02d}-T{item.makemkv_id:03d}'
+        variant = ''.join(ch for ch in (item.version or (f'A{item.angle:02d}' if item.angle else '')) if ch.isalnum())[:16]
+        basename = f'ASQ-S{master.season:02d}-D{disc.number:02d}-T{item.makemkv_id:03d}' + (f'-{variant}' if variant else '')
         result.append({'arm_track_id':track['track_id'], 'makemkv_id':item.makemkv_id,
-                       'dvd_title':item.dvd_title,'angle':item.angle,'mapping_evidence':item.evidence,
-                       'episode':ep.model_dump(),'destination':dest,'basename':basename,
-                       'scan_duration':track['length'],'scan':track})
+                        'dvd_title':item.dvd_title,'angle':item.angle,'mapping_evidence':item.evidence,
+                        'episode':ep.model_dump() if ep else None,
+                        'extra':extra.model_dump() if extra else None,
+                        'content_name':content_name,'version':item.version,
+                        'destination':dest,'basename':basename,
+                        'inventory':inventory.model_dump(),
+                        'scan_duration':track['length'],'scan':track})
+    if len({item['destination'] for item in result}) != len(result):
+        raise ValueError('Selected episode/extra/version outputs collide at the destination')
     return result

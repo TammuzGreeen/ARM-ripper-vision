@@ -179,7 +179,10 @@ def publish_manifest(manifest_path,media,library,handover):
             raise ValueError('v1 publishes television season media only')
         src = beneath(media,output['media_relative_path'])
         dest = beneath(library,output['destination'])
-        inspected = inspect_file(src,body['source_inventory'],output['scan_duration'])
+        # New manifests carry the effective per-title inventory on each output.
+        # Older manifests remain compatible through their disc-level default.
+        inventory = output.get('inventory', body['source_inventory'])
+        inspected = inspect_file(src,inventory,output['scan_duration'])
         if inspected['sha256']!=output['sha256'] or inspected['bytes']!=output['bytes']:
             raise ValueError('Manifest source hash/size no longer matches')
         copy_verified(src,dest,output['sha256'])

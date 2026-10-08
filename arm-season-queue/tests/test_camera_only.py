@@ -31,8 +31,9 @@ class CameraOnlyTests(unittest.TestCase):
         c.recognition_done(event, self.result())
         c.poll_once()
         row = self.event(event)
-        self.assertEqual(row['status'], 'review')
+        self.assertEqual(row['status'], 'rejected_for_review')
         self.assertEqual(json.loads(row['body'])['result'], self.result())
+        self.assertEqual(len(c.db.rejections('pending')), 1)
         self.assertIn('Camera-only', c.status)
         self.assertFalse(c.initialized)
 

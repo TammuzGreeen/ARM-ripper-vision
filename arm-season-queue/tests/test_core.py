@@ -13,7 +13,8 @@ from fastapi.testclient import TestClient
 from app.arm import job_identity, plan
 from app.camera import PresentationGate
 from app.config import Settings
-from app.formats import Masterlist, destination
+from app.formats import (Masterlist, destination, digest,
+                         output_destination, resolve_mapping_rule, rip_readiness)
 from app.handover import beneath, checksum, copy_verified, publish_json, validate_probe
 from app.main import create_app
 from app.recognition import consensus, extract, match
@@ -39,6 +40,22 @@ def detail():
 
 
 class RecognitionTests(unittest.TestCase):
+    def test_structural_labels_are_normalized_across_four_languages(self):
+        examples = (
+            'Star Trek Deep Space Nine\nSeason 2\nDisc 1\nEpisodes 1-4',
+            'Star Trek Deep Space Nine\nStaffel 2\nDisc 1\nEpisoden 1-4',
+            'Star Trek Deep Space Nine\nSaison 2\nDisque 1\nÉpisodes 1-4',
+            'Star Trek Deep Space Nine\nTemporada 2\nDisco 1\nEpisodios 1-4',
+        )
+        for text in examples:
+            with self.subTest(text=text):
+                frames = [extract(text, .96) for _ in range(3)]
+                self.assertEqual(frames[0]['season'], 2)
+                self.assertEqual(frames[0]['disc'], 1)
+                self.assertEqual(frames[0]['episodes'][0]['first'], 1)
+                self.assertEqual(frames[0]['episodes'][0]['last'], 4)
+                self.assertTrue(consensus(frames)['accepted'])
+
     def test_clear_match_and_out_of_order(self):
         for number in (1,3,2):
             result = consensus([observation(number) for _ in range(3)])
@@ -82,6 +99,95 @@ class RecognitionTests(unittest.TestCase):
 
 
 class MappingTests(unittest.TestCase):
+    def test_published_borgia_voyager_drafts_import_as_metadata_and_stay_rip_blocked(self):
+        root=Path(__file__).parents[1]/'examples'/'masterlist-drafts'
+        files=[path for path in root.rglob('*.json') if path.name!='completeness_summary.json']
+        self.assertEqual(len(files),10)
+        masters=[Masterlist.model_validate_json(path.read_text('utf-8')) for path in files]
+        self.assertTrue(all(master.schema_version==2 and not master.approved for master in masters))
+        self.assertEqual(sum(len(d.episodes) for m in masters for d in m.discs),208)
+        extras_only=[d for m in masters for d in m.discs if d.extras_only]
+        self.assertEqual(len(extras_only),1)
+        self.assertEqual(extras_only[0].number,5)
+        self.assertTrue(all(rip_readiness(m,d) for m in masters for d in m.discs))
+
+    def test_metadata_only_v2_draft_imports_but_is_not_rip_ready(self):
+        data=master().model_dump()
+        data.update(schema_version=2, approved=False)
+        disc=data['discs'][0]
+        disc.update(episodes=[dict(disc['episodes'][0],title=None)], extras=[], extras_only=False,
+                    expected_title_count=None, order=None, selection_ids=[], title_map=[], inventory={})
+        draft=Masterlist.model_validate(data)
+        self.assertEqual(len(draft.discs[0].episodes),1)
+        self.assertIsNone(draft.discs[0].episodes[0].title)
+        self.assertTrue(any('Source title count' in issue for issue in rip_readiness(draft,draft.discs[0])))
+        with self.assertRaisesRegex(ValueError,'metadata-only or technically incomplete'):
+            plan(draft,draft.discs[0],detail())
+
+    def test_extras_only_disc_and_extra_output_are_representable(self):
+        data=master().model_dump();data.update(schema_version=2)
+        d=data['discs'][0]
+        inventory=dict(d['inventory'],complete=True,evidence='Generated unit fixture; source scan not claimed')
+        d.update(episodes=[],extras=[{'id':'trailers','title':'Trailers'}],extras_only=True,
+                 expected_title_count=1,order='explicit',selection_ids=[0],
+                 inventory=inventory,title_map=[{'makemkv_id':0,'extra_id':'trailers','evidence':'unit fixture'}])
+        m=Masterlist.model_validate(data);disc=m.discs[0]
+        rows=plan(m,disc,{'job':{'job_id':5,'label':'EU_103539'},'tracks':[{'track_id':50,'track_number':'0','length':200,'fps':25}]})
+        self.assertEqual(rows[0]['extra']['id'],'trailers')
+        self.assertIn('/Extras/',rows[0]['destination'])
+
+    def test_multiple_versions_for_one_episode_have_distinct_output_paths(self):
+        data=master().model_dump();data.update(schema_version=2)
+        d=data['discs'][0]
+        inventory=dict(d['inventory'],complete=True,evidence='Generated unit fixture; source scan not claimed')
+        d.update(expected_title_count=2,order='explicit',selection_ids=[0,1],inventory=inventory,
+                 title_map=[{'makemkv_id':0,'episode_index':0,'version':'Perspective A','evidence':'unit fixture'},
+                            {'makemkv_id':1,'episode_index':0,'version':'Perspective B','evidence':'unit fixture'}])
+        m=Masterlist.model_validate(data);disc=m.discs[0]
+        targets=[output_destination(m,disc,item) for item in disc.title_map]
+        self.assertEqual(len(set(targets)),2)
+        rows=plan(m,disc,{'job':{'job_id':5,'label':'EU_103539'},'tracks':[
+            {'track_id':50,'track_number':'0','length':2610,'fps':25},
+            {'track_id':51,'track_number':'1','length':2610,'fps':25}]})
+        self.assertEqual([row['version'] for row in rows],['Perspective A','Perspective B'])
+
+    def test_same_source_cannot_be_ripped_as_separate_unverified_angles(self):
+        data=master().model_dump();data.update(schema_version=2)
+        d=data['discs'][0];inventory=dict(d['inventory'],complete=True,evidence='fixture')
+        d.update(labels=[],expected_title_count=1,order='explicit',selection_ids=[0],inventory=inventory,
+                 title_map=[{'makemkv_id':0,'episode_index':0,'version':'A','evidence':'fixture'},
+                            {'makemkv_id':0,'episode_index':0,'version':'B','evidence':'fixture'}])
+        m=Masterlist.model_validate(data)
+        with self.assertRaisesRegex(ValueError,'multiple outputs from one MakeMKV title'):
+            plan(m,m.discs[0],{'job':{'job_id':5},'tracks':[{'track_id':50,'track_number':'0','length':2610}]})
+
+    def test_scoped_user_mapping_rule_resolves_only_against_matching_scan(self):
+        data=master().model_dump();data.update(schema_version=2)
+        d=data['discs'][0]
+        d.update(mapping_rules=[{'kind':'ascending_makemkv_id_to_episode_index','edition':data['edition'],
+                                 'first_makemkv_id':0,'first_episode_index':0,
+                                 'evidence':'USER-SUPPLIED convention for this edition/disc'}],
+                 selection_ids=[],title_map=[])
+        m=Masterlist.model_validate(data);disc=m.discs[0]
+        resolved=resolve_mapping_rule(m,disc,[0,1,2,3],{0:1,1:2,2:3,3:4})
+        self.assertEqual([x.episode_index for x in resolved],[0,1,2,3])
+        self.assertEqual([x.dvd_title for x in resolved],[1,2,3,4])
+        with self.assertRaisesRegex(ValueError,'contradict'):
+            resolve_mapping_rule(m,disc,[0,1,3,4])
+
+    def test_legacy_masterlist_hash_is_unchanged_by_absent_title_inventory(self):
+        current=master().model_dump()
+        legacy=copy.deepcopy(current)
+        for disc in legacy['discs']:
+            for title in disc.get('title_map',[]):
+                title.pop('inventory',None)
+        self.assertEqual(digest(Masterlist.model_validate(legacy)),digest(legacy))
+        m=Masterlist.model_validate(legacy)
+        changed=m.model_copy(deep=True)
+        changed.discs[0].title_map[0].inventory=changed.discs[0].inventory.model_copy(
+            update={'subtitles':changed.discs[0].inventory.subtitles+['eng']})
+        self.assertNotEqual(digest(m),digest(changed))
+
     def test_three_different_id_spaces(self):
         mapping=plan(master(),master().discs[0],detail())
         self.assertEqual((mapping[0]['arm_track_id'],mapping[0]['makemkv_id'],mapping[0]['dvd_title']),(800,0,1))
@@ -114,6 +220,20 @@ class MappingTests(unittest.TestCase):
         m=master();m.discs[0].inventory.complete=False
         with self.assertRaisesRegex(ValueError,'source stream inventory'):
             plan(m,m.discs[0],detail())
+
+    def test_title_inventory_overrides_disc_default_and_is_carried_into_plan(self):
+        m=master();d=m.discs[0]
+        d.title_map[0].inventory=d.inventory.model_copy(update={
+            'subtitles':d.inventory.subtitles+['eng'], 'evidence':'Title 0 scan: extra English subtitle'})
+        mapping=plan(m,d,detail())
+        self.assertEqual(mapping[0]['inventory']['subtitles'],d.inventory.subtitles+['eng'])
+        self.assertEqual(mapping[1]['inventory']['subtitles'],d.inventory.subtitles)
+
+    def test_incomplete_title_override_does_not_fall_back_to_disc_inventory(self):
+        m=master();d=m.discs[0]
+        d.title_map[0].inventory=d.inventory.model_copy(update={'complete':False,'evidence':''})
+        with self.assertRaisesRegex(ValueError,'inventory.*MakeMKV ID 0'):
+            plan(m,d,detail())
 
     def test_known_label_conflict(self):
         value=detail();value['job']['label']='OTHER'
@@ -229,6 +349,21 @@ class PublicationTests(unittest.TestCase):
         probe['streams'].pop()
         with self.assertRaisesRegex(ValueError,'subtitle'):validate_probe(probe,inventory,2614)
 
+    def test_per_title_inventory_accepts_11_vs_10_subtitles_and_rejects_wrong_output(self):
+        base=master().discs[0].inventory.model_dump()
+        title0=dict(base,subtitles=base['subtitles']+['eng'],evidence='title 0 scan')
+        def probe_for(inventory):
+            return {'streams':[{'codec_type':'video','codec_name':'mpeg2video','width':720,'height':576,'r_frame_rate':'25/1'}]+
+                [{'codec_type':'audio','channels':c,'tags':{'language':lang}} for c,lang in zip([6,6,2,2,2],inventory['audio'])]+
+                [{'codec_type':'subtitle','tags':{'language':lang}} for lang in inventory['subtitles']],
+                'chapters':[{}]*8,'format':{'duration':'2618'}}
+        validate_probe(probe_for(title0),title0,2614)
+        validate_probe(probe_for(base),base,2614)
+        with self.assertRaisesRegex(ValueError,'subtitle'):
+            validate_probe(probe_for(base),title0,2614)
+        with self.assertRaisesRegex(ValueError,'subtitle'):
+            validate_probe(probe_for(title0),base,2614)
+
 
 class WebTests(unittest.TestCase):
     def test_auth_csrf_import_status_and_schema(self):
@@ -240,6 +375,15 @@ class WebTests(unittest.TestCase):
                 self.assertEqual(client.get('/health').status_code,200)
                 client.auth=('operator','unit-test-only')
                 self.assertEqual(client.get('/').status_code,200)
+                html=client.get('/').text
+                for label in ('Disc workflow','workflow-stages','Next disc'):
+                    self.assertIn(label,html)
+                self.assertIn('draft-episodes',html)
+                js=client.get('/static/app.js')
+                self.assertEqual(js.status_code,200)
+                for label in ('Ready','Camera recognition','Recognition and review','ARM handoff and ripping','Finished and FileFlows handoff','Confirm corrections and continue'):
+                    self.assertIn(label,js.text)
+                self.assertIn('max-width:760px',client.get('/static/style.css').text)
                 self.assertEqual(client.get('/api/schema/masterlist').status_code,200)
                 self.assertEqual(client.post('/api/masters',content=master().model_dump_json()).status_code,403)
                 r=client.post('/api/masters',content=master().model_dump_json(),headers={'X-Queue-Request':'1'})

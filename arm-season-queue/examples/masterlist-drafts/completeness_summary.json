@@ -1,4 +1,13 @@
 {
+  "total": {
+    "season_files": 10,
+    "episode_bearing_discs": 54,
+    "episode_entries": 208,
+    "extras_only_discs": 1,
+    "technical_scan_discs": 0,
+    "metadata_importable": true,
+    "rip_ready": false
+  },
   "borgia": {
     "seasons": [
       1,
@@ -8,10 +17,12 @@
     "episode_discs": 8,
     "episode_titles_completed_online": true,
     "identified_edition": "2016 Studiocanal Gesamtedition [8 Blu-rays], EAN 4006680082547",
-    "import_ready": false,
-    "blocking_fields": [
-      "Disc.expected_title_count",
-      "Disc.order"
+    "metadata_importable": true,
+    "rip_ready": false,
+    "execution_blockers": [
+      "distinct source-title count",
+      "source-title ordering and explicit mappings",
+      "per-title inventories and unique output filenames"
     ]
   },
   "voyager": {
@@ -25,11 +36,13 @@
       7
     ],
     "season_1_completed_online": true,
-    "extras_only_disc_not_representable": "Season 1 Disc 5",
-    "import_ready": false,
-    "blocking_fields": [
-      "Disc.expected_title_count",
-      "Disc.order"
+    "extras_only_disc": "Season 1 Disc 5 represented as metadata-only v2 extras-only disc",
+    "metadata_importable": true,
+    "rip_ready": false,
+    "execution_blockers": [
+      "distinct source-title count",
+      "source-title ordering and explicit mappings",
+      "per-title inventories and unique output filenames"
     ]
   }
 }
