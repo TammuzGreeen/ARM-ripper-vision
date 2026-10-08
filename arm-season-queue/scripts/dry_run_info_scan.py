@@ -26,6 +26,7 @@ DRIVE_STATUS = 0x5326       # CDROM_DRIVE_STATUS
 DISC_STATUS = 0x5327        # CDROM_DISC_STATUS
 MEDIA_CHANGED = 0x5325      # CDROM_MEDIA_CHANGED
 CLOSE_TRAY = 0x5319         # CDROMCLOSETRAY
+DATA_MEDIA_STATUSES = {4, 101, 102, 103, 104, 105}
 
 
 def api_json(base, path):
@@ -57,10 +58,15 @@ def drive_ioctl(device, operation):
         os.close(fd)
 
 
+def data_medium_ready(drive_status, disc_status):
+    """Linux CDROM_DISC_STATUS uses CDS_DATA_* values 101–105 for data discs."""
+    return drive_status == 4 and disc_status in DATA_MEDIA_STATUSES
+
+
 def wait_ready(device, timeout):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if drive_ioctl(device, DRIVE_STATUS) == 4 and drive_ioctl(device, DISC_STATUS) in (4, 5, 6, 7, 8):
+        if data_medium_ready(drive_ioctl(device, DRIVE_STATUS), drive_ioctl(device, DISC_STATUS)):
             return
         time.sleep(.5)
     raise RuntimeError(f'Drive did not report a ready data medium within {timeout} seconds')

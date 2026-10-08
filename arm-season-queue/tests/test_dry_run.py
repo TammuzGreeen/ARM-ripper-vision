@@ -1,5 +1,8 @@
 import threading
 import unittest
+import importlib.util
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from app.dry_run import build_plan, parse_info
@@ -7,10 +10,11 @@ from app.formats import Disc, Episode, Inventory, Masterlist, TitleMap, digest
 from app.controller import Controller
 from app.camera import Camera
 from app.state import Store
-from tempfile import TemporaryDirectory
-from pathlib import Path
 
-
+SCAN_HELPER = Path(__file__).parents[1] / 'scripts' / 'dry_run_info_scan.py'
+_spec = importlib.util.spec_from_file_location('dry_run_info_scan', SCAN_HELPER)
+dry_scan = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(dry_scan)
 INFO = '''
 CINFO:1,6206,"DVD disc"
 CINFO:2,0,"EU_104279"
@@ -210,6 +214,13 @@ class DryRunTests(unittest.TestCase):
         self.assertTrue(c.capture_deadline_reached(160.0))
         c.submitted=True
         self.assertFalse(c.capture_deadline_reached(200.0))
+
+    def test_linux_data_disc_status_codes_allow_dvd_readiness(self):
+        self.assertTrue(dry_scan.data_medium_ready(4,101))
+        self.assertTrue(dry_scan.data_medium_ready(4,102))
+        self.assertTrue(dry_scan.data_medium_ready(4,105))
+        self.assertFalse(dry_scan.data_medium_ready(2,101))
+        self.assertFalse(dry_scan.data_medium_ready(4,1))
 
     def test_dryrun_restart_preserves_production_event_and_reservation_rows(self):
         from tempfile import TemporaryDirectory
