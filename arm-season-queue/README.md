@@ -113,8 +113,9 @@ the ordinary ARM plan/filename logic. Every filename and full local destination
 is marked **would be created**; the read-only queue media mount is not written.
 Only after reviewing the capture, recognition, correction, scan, blockers and
 proposed files can the operator save **Test successful** or **Needs changes**.
-Neither choice dispatches work. The final plan always reports
-`ready_for_ripping: false`.
+This assessment rates the supervised workflow only; a blocked plan stays blocked
+even if the workflow is marked successful. Neither choice dispatches work. The
+final plan always reports `ready_for_ripping: false`.
 
 Example host invocation (adjust local paths/container names; never store the
 report, config, keys or capture in Git):

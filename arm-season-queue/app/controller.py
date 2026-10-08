@@ -301,8 +301,6 @@ class Controller:
             run = self._dry_run(run_id)
             if not run.get('scan') or not run.get('plan'):
                 raise ValueError('Final review requires capture, recognition outcome, scan and proposed plan')
-            if outcome == 'test_successful' and run['plan'].get('blockers'):
-                raise ValueError('A blocked or contradictory proposed plan cannot be assessed as Test successful')
             run['assessment'] = {'outcome':outcome,'notes':str(notes)[:2000],'assessed_at':time.time()}
             run['status'] = 'assessed'
             self.db.put('active_dry_run', run)

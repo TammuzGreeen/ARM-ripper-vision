@@ -25,20 +25,32 @@ completed paths are on ext4. FileFlows is disabled.
 The live camera preview shows the physical open optical tray in the camera's
 field of view and a label-up DVD can be read in that position. No separate
 automatic transfer mechanism is present or assumed. The preview frame was a
-temporary diagnostic, not the dry-run's fresh retained capture. No dry-run has
-been started; no fresh recognition or optical scan has run for this requested
-workflow, and no media output was created. The camera currently needs empty-view
-calibration before the fresh presentation. Physical tray closure, the current
-disc's readability, scan parsing against the fresh medium, the GUI proposal,
-and the assessment remain outstanding.
+temporary diagnostic, not the dry-run's fresh retained capture. At the end of
+preparation no dry-run had started; camera calibration, capture, scan, GUI
+proposal and assessment were then outstanding.
 
-The active application suite passes **150 tests** in a network-isolated Linux
+The active application suite passes **153 tests** in a network-isolated Linux
 container, including dry-run parsing/planning, scan inventory and mapping
 conflict blockers, excluded titles, database privacy, same-capture association,
 non-pairing, no-reservation behavior, and a dry-run tick that does not query ARM
 or mutate production state. This test result does not qualify the physical
 camera, optical drive, MakeMKV scanner helper on the present medium, or ARM's
 pause-database failure behavior.
+
+## Completed supervised dry-run; final review pending (2026-10-08)
+
+The supervised local workflow then ran against one fresh camera presentation.
+Three frames were retained; the two configured recognition models completed but
+disagreed on the printed episode range, so the result remained unmatched. The
+bounded host helper closed the tray and completed a network-isolated MakeMKV
+`info` scan only after ARM's global pause was verified and ARM's automatically
+created job reached `manual_paused`. No ARM scan/processing route was called.
+The shared planner built four local-SSD proposed paths, but the plan remains
+blocked on camera identity, always `ready_for_ripping: false`; the final GUI
+review and operator assessment are pending. No rip, transcode, FileFlows
+request, production reservation/completion, or media output file was created.
+The scan report, capture and private local deployment configuration remain
+outside Git.
 
 ## GUI/masterlist update (2026-10-08)
 

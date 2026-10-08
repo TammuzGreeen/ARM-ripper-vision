@@ -234,6 +234,19 @@ class DryRunTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'manual_paused'):
                 dry_scan.held_current_job(drive,jobs,'/dev/sr0')
 
+    def test_workflow_assessment_does_not_clear_plan_blockers_or_rip_readiness(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.state import Store
+        with TemporaryDirectory() as temp:
+            c=Controller.__new__(Controller);c.lock=threading.RLock();c.db=Store(Path(temp)/'queue.sqlite3')
+            plan={'blockers':['unresolved camera identity'],'ready_for_ripping':False}
+            c.db.put('active_dry_run',{'id':'run','status':'review','scan':{'summary':{}},'plan':plan})
+            result=c.assess_dry_run('run','test_successful','workflow worked, identity still unresolved')
+            self.assertEqual(result['assessment']['outcome'],'test_successful')
+            self.assertEqual(result['plan']['blockers'],['unresolved camera identity'])
+            self.assertFalse(result['plan']['ready_for_ripping'])
+
     def test_dryrun_restart_preserves_production_event_and_reservation_rows(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
