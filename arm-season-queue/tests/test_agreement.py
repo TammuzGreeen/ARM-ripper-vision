@@ -40,6 +40,55 @@ class AgreementGateTests(unittest.TestCase):
                 result = self.result(text)
                 self.assertTrue(result['accepted'], result['reasons'])
 
+    def test_actual_camera_transcriptions_normalize_to_equivalent_identity(self):
+        primary = ('Series/title: STAR TREK VOYAGER\nSeason: 2\nDisc: 1\n'
+                   'Printed episodes/range: EPISODES 1-4\nEdition/version:')
+        secondary = ('Series/title: STAR TREK VOYAGER\nSeason: 2\nDisc: 1\n'
+                     'Printed episodes/range: 1-4\nEdition/version:')
+        voyager = master().model_copy(update={
+            'series': 'Star Trek Voyager', 'title_aliases': ['STAR TREK VOYAGER']})
+        result = evaluate({MODEL_ORDER[0]: primary, MODEL_ORDER[1]: secondary},
+                          {tag: {'usable': True} for tag in MODEL_ORDER}, [voyager])
+        self.assertTrue(result['accepted'], result['reasons'])
+        self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[0]]['episodes'], [1, 2, 3, 4])
+        self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[1]]['episodes'], [1, 2, 3, 4])
+        self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[0]]['disc_numbers'], [1])
+        proof = result['validated_candidates'][0]
+        self.assertEqual(proof['primary']['titles']['status'], 'OMITTED')
+        self.assertFalse(proof['primary']['titles']['required'])
+
+    def test_episode_range_accepts_spacing_and_unicode_dashes_but_only_in_labeled_field(self):
+        for notation in ('1 - 4', '1–4', '1 — 4', '1 − 4'):
+            text = self.transcript().replace('Episodes 1-4', f'Episoden: {notation}')
+            result = self.result(text)
+            self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[0]]['episodes'], [1, 2, 3, 4])
+            self.assertTrue(result['accepted'], result['reasons'])
+        unrelated = ('Star Trek Deep Space Nine\nSeason 2\nDisc 1\nCatalog 1-4\n'
+                     'Runtime 42-45 minutes\nTeil 1')
+        result = self.result(unrelated)
+        self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[0]]['episodes'], [])
+
+    def test_missing_optional_titles_are_not_model_disagreement(self):
+        first = self.transcript()
+        second = 'Star Trek Deep Space Nine\nSeason 2\nDisc 1\nTeil 1\nEpisodes 1-4'
+        result = self.result(first, second)
+        self.assertTrue(result['accepted'], result['reasons'])
+        self.assertFalse(any(item['field'] == 'titles' for item in result['field_disagreements']))
+
+    def test_missing_required_episode_observation_is_not_filled_from_masterlist(self):
+        first = self.transcript()
+        second = 'Star Trek Deep Space Nine\nSeason 2\nDisc 1\nTeil 1'
+        result = self.result(first, second)
+        self.assertFalse(result['accepted'])
+        self.assertFalse(any(item['field'] == 'episodes' for item in result['field_disagreements']))
+        self.assertIn('missing_required_priority_fields', result['reasons'])
+        self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[1]]['episodes'], [])
+
+    def test_different_explicit_episode_ranges_remain_a_real_disagreement(self):
+        result = self.result(self.transcript(episodes='1-4'), self.transcript(episodes='5-8'))
+        self.assertFalse(result['accepted'])
+        self.assertIn('episodes', [item['field'] for item in result['field_disagreements']])
+
     def test_localized_season_and_disc_labels_are_parsed(self):
         variants = (
             ('Staffel 2', 'Disc 1'), ('Season 2', 'Disk 1'),

@@ -218,8 +218,12 @@ def _parse_text(text: str, masters: list) -> dict:
         r"\b(\d{1,2})\s*\.?\s*(?:season|temporada|staffel|saison)\b|\bS(\d{1,2})E\d{1,3}\b", label_text
     )}
     episode_numbers = set()
+    # Parse ranges only from an explicitly labeled episode field. This accepts
+    # the prompt's "Printed episodes/range:" form without treating unrelated
+    # catalogue numbers or durations elsewhere in a transcription as episodes.
     for start, end in re.findall(
-        r"(?i)\b(?:episode|eps?\.?|episode\s+range)\s*[:#]?\s*(\d{1,3})\s*(?:[-–—]\s*(\d{1,3}))?", label_text
+        r"(?im)^\s*(?:printed\s+)?episode(?:s)?(?:\s*/\s*range|\s+range)?\s*[:#]?\s*"
+        r"(?:episode(?:s)?\s*[:#]?\s*)?(\d{1,3})\s*(?:[-–—−]\s*(\d{1,3}))?\s*$", label_text
     ):
         first, last = int(start), int(end or start)
         if last < first or last - first > 100:
@@ -235,7 +239,7 @@ def _parse_text(text: str, masters: list) -> dict:
                 if _phrase(text, episode.title):
                     titles.add(normalize(episode.title))
     disc_numbers = {int(value) for value in re.findall(
-        r"(?i)\b(?:disc|disk)\s*(?:number\s*)?(?:no\.?\s*)?#?\s*(\d{1,2})\b", label_text)}
+        r"(?i)\b(?:disc|disk)\s*(?:number\s*)?(?:no\.?\s*)?[:#]?\s*(\d{1,2})\b", label_text)}
     return {"series": sorted(series), "seasons": sorted(seasons),
             "episodes": sorted(episode_numbers), "titles": sorted(titles),
             "disc_numbers": sorted(disc_numbers),
@@ -264,7 +268,7 @@ def _candidate_fields(parsed: dict, master, disc) -> dict:
         "episodes": {"value": expected_episodes, "observed": parsed["episodes"],
                      "status": "CORRECT" if parsed["episodes"] == expected_episodes and expected_episodes else "WRONG_BUT_PLAUSIBLE" if parsed["episodes"] else "OMITTED"},
         "titles": {"value": expected_titles, "observed": parsed["titles"],
-                   "required": bool(expected_titles),
+                   "required": False,
                    "status": "CORRECT" if set(expected_titles) == set(parsed["titles"]) and expected_titles else "WRONG_BUT_PLAUSIBLE" if parsed["titles"] else "OMITTED"},
     }
 
@@ -275,7 +279,10 @@ def evaluate(transcriptions: dict[str, str], run_results: dict[str, dict], maste
     disagreements = []
     for field in ("series", "seasons", "episodes", "titles", "disc_numbers",
                   "edition_master_ids", "printed_identifier_disc_ids"):
-        if parsed[PRIMARY_MODEL][field] != parsed[SECONDARY_MODEL][field]:
+        # Absence is not a conflicting observation. Required identity fields
+        # are checked independently against each candidate below.
+        if (parsed[PRIMARY_MODEL][field] and parsed[SECONDARY_MODEL][field]
+                and parsed[PRIMARY_MODEL][field] != parsed[SECONDARY_MODEL][field]):
             disagreements.append({"field": field, "primary": parsed[PRIMARY_MODEL][field],
                                   "secondary": parsed[SECONDARY_MODEL][field]})
 

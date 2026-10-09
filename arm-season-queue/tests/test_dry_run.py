@@ -1,6 +1,7 @@
 import threading
 import unittest
 import importlib.util
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -93,6 +94,12 @@ class DryRunTests(unittest.TestCase):
                          '/local-ssd/completed/tv/Star Trek Voyager/Season 02/Star Trek Voyager S02E01 - Die 37er - German DVD split-season release.mkv')
         self.assertEqual(proposal['outputs'][0]['destination_kind'],'would be created')
         self.assertEqual(proposal['outputs'][0]['audio_streams'][0]['language'],'eng')
+
+    def test_proposal_rebuild_survives_json_persisted_scan_title_keys(self):
+        m=master();d=m.discs[0];info=parse_info(INFO)
+        restored=json.loads(json.dumps(info))
+        proposal=build_plan(m,d,restored,'/local-ssd/completed')
+        self.assertEqual(len(proposal['outputs']),len(d.title_map))
 
     def test_conflicting_dvd_title_or_stream_inventory_blocks_preview(self):
         changed=INFO.replace('TINFO:0,24,0,"01"','TINFO:0,24,0,"03"')

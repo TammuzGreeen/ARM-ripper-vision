@@ -117,6 +117,12 @@ This assessment rates the supervised workflow only; a blocked plan stays blocked
 even if the workflow is marked successful. Neither choice dispatches work. The
 final plan always reports `ready_for_ripping: false`.
 
+When deterministic recognition parsing or matching logic is corrected, an
+unassessed scanned dry run can re-evaluate retained response streams without
+calling either model or touching the drive. Original model transcriptions,
+stream files, capture and scan remain the evidence; normalized fields and each
+matching decision are shown separately.
+
 Example host invocation (adjust local paths/container names; never store the
 report, config, keys or capture in Git):
 

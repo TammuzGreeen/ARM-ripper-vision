@@ -29,7 +29,7 @@ temporary diagnostic, not the dry-run's fresh retained capture. At the end of
 preparation no dry-run had started; camera calibration, capture, scan, GUI
 proposal and assessment were then outstanding.
 
-The active application suite passes **153 tests** in a network-isolated Linux
+The active application suite passes **159 tests** in a network-isolated Linux
 container, including dry-run parsing/planning, scan inventory and mapping
 conflict blockers, excluded titles, database privacy, same-capture association,
 non-pairing, no-reservation behavior, and a dry-run tick that does not query ARM
@@ -51,6 +51,50 @@ review and operator assessment are pending. No rip, transcode, FileFlows
 request, production reservation/completion, or media output file was created.
 The scan report, capture and private local deployment configuration remain
 outside Git.
+
+## Recognition normalization correction
+
+The retained raw model stream completions contain the original transcriptions
+`Printed episodes/range: 1-4` and `Printed episodes/range: EPISODES 1-4`.
+Initially, structural-label normalization changed `episodes` to `episode`,
+leaving the `/range` suffix unhandled; the episode parser therefore omitted one
+model's range. The other model's redundant `EPISODES` token was also not
+accepted after the field label. Separately, `Disc: 1` was omitted by the disc
+number parser, and absent episode titles were incorrectly mandatory in the
+candidate proof. These caused the recorded missing-fields and model
+disagreement reasons; the original response evidence was intact.
+
+The first retained-only reevaluation then passed semantic agreement but exposed
+an integration issue: the reevaluation result held the unique match inside the
+agreement object, while the controller's fail-closed handoff consumes the
+validated top-level `matches` field. The reevaluation path now carries the
+validated match through that same controller gate; it does not bypass it.
+
+The corrected parser accepts explicitly labeled English/German/French/Spanish
+episode range fields, whitespace and dash variants, and the actual two response
+forms. It does not infer episodes from unlabeled numbers. Agreement compares
+conflicting semantic observations while treating a missing value as missing;
+both models must still independently supply required series, season and episode
+range evidence. Episode titles are optional. Regression coverage also verifies
+that a genuinely missing required episode observation stays missing rather than
+being copied from the masterlist.
+
+The retained run was re-evaluated using only the existing response streams,
+images and attached scan. Both models independently normalize to series
+`star trek voyager`, season 2, disc 1, episodes `[1, 2, 3, 4]`. The unique
+compatible approved entry is `star_trek_voyager_s2_de_split_dvd` / Disc 1.
+The existing info scan corroborates the approved mapping and per-title
+inventories for MakeMKV IDs 0–3 / DVD titles 1–4; the episode association still
+comes from the user-approved mapping, not title count alone. The plan now has no
+blockers, proposes four filenames, and remains `ready_for_ripping: false`.
+Deployment image `arm-season-queue:dry-run-only-20261009-r3` is active. No new
+inference, physical drive action, assessment, rip, FileFlows dispatch, or media
+output was performed; the operator review remains pending.
+At the final read-only status check, ARM's global ripping pause remained on and
+the detected `/dev/sr0` job was `fail` with `Received signal 15`, no manual-start
+request, and no output; the companion has zero reservations/active batches and
+the local completed directory contains zero media files. This ARM job state is
+reported separately and was not modified by the recognition reevaluation.
 
 ## GUI/masterlist update (2026-10-08)
 

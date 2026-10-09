@@ -9,7 +9,8 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 
 from .arm import ARM, job_identity, plan, structure
-from .agreement import MODEL_ORDER, normalize as normalize_printed, preflight as agreement_preflight
+from .agreement import (MODEL_ORDER, evaluate as evaluate_agreement,
+                        normalize as normalize_printed, preflight as agreement_preflight)
 from .formats import Masterlist, digest
 from .dry_run import build_plan as build_dry_run_plan, parse_info
 from .handover import beneath, canonical, inspect_file, publish_json
@@ -293,6 +294,67 @@ class Controller:
         output['plan_status'] = 'blocked' if output['blockers'] else 'provisional dry-run preview'
         run['plan'] = output
         run['status'] = 'review'
+
+    def reevaluate_dry_run_recognition(self, run_id):
+        """Re-run deterministic agreement/matching over retained model text only."""
+        with self.lock:
+            run = self._dry_run(run_id)
+            if not run.get('scan') or run.get('assessment'):
+                raise ValueError('Re-evaluation requires an unassessed dry run with its scan attached')
+            recognition = run.get('recognition') or {}
+            event = run.get('event')
+            if recognition.get('event') != event or not recognition.get('result'):
+                raise ValueError('Retained recognition evidence is missing or no longer associated')
+            result = dict(recognition['result'])
+            runs = result.get('runs') or {}
+            if (tuple(result.get('model_tags') or ()) != MODEL_ORDER
+                    or set(runs) != set(MODEL_ORDER)
+                    or any(not runs[tag].get('usable') or not runs[tag].get('transcription')
+                           for tag in MODEL_ORDER)):
+                raise ValueError('Both original usable model transcriptions are required')
+            evidence = self.s.state / 'evidence' / event
+            filenames = ('agreement-primary-30b-stream.jsonl',
+                         'agreement-secondary-7b-stream.jsonl')
+            for tag, filename in zip(MODEL_ORDER, filenames):
+                if runs[tag].get('response_file') != filename:
+                    raise ValueError('Retained response file association is invalid')
+                chunks = []
+                for line in (evidence / filename).read_text('utf-8').splitlines():
+                    payload = json.loads(line)
+                    content = (payload.get('message') or {}).get('content')
+                    if isinstance(content, str):
+                        chunks.append(content)
+                if ''.join(chunks).strip() != runs[tag]['transcription']:
+                    raise ValueError('Retained raw response does not match its original transcription')
+            prior = result.get('agreement')
+            history = list(result.get('agreement_revisions') or [])
+            if prior:
+                history.append({'policy':prior.get('policy'), 'status':prior.get('status'),
+                                'reasons':prior.get('reasons'), 'normalized_priority_fields':prior.get('normalized_priority_fields'),
+                                'field_disagreements':prior.get('field_disagreements')})
+            result['agreement'] = evaluate_agreement(
+                {tag: runs[tag]['transcription'] for tag in MODEL_ORDER}, runs, self.masters())
+            result['agreement_revisions'] = history
+            result['accepted'] = result['agreement']['accepted']
+            result['matches'] = result['agreement'].get('matches') or []
+            result['policy'] = result['agreement']['policy']
+            result['reason'] = '; '.join(result['agreement']['reasons']) or 'Both models agree on identifying fields'
+            # Build and validate the full preview before changing the stored
+            # recognition result, so a planner failure cannot partially apply
+            # the reevaluation.
+            proposed = dict(run)
+            proposed['recognition'] = {'matches': result['agreement'].get('matches') or []}
+            self._rebuild_dry_run_plan(proposed)
+            self.recognition_done(event, result)
+            refreshed = self._dry_run(run_id)
+            proposed_matches = proposed['recognition']['matches']
+            stored_matches = (refreshed.get('recognition') or {}).get('matches') or []
+            if proposed_matches != stored_matches:
+                self._rebuild_dry_run_plan(refreshed)
+            else:
+                refreshed['plan'] = proposed['plan']
+            self.db.put('active_dry_run', refreshed)
+            return refreshed
 
     def assess_dry_run(self, run_id, outcome, notes=''):
         if outcome not in ('test_successful','needs_changes'):

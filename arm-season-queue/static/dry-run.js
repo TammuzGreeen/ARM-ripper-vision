@@ -37,7 +37,18 @@
       if(evidence){const a=document.createElement('a');a.href='/api/evidence/'+evidence;a.target='_blank';const im=document.createElement('img');im.src=a.href;im.alt='Retained camera capture';im.className='dry-run-image';a.append(im);panel.append(a)}
       const matches=run.recognition.matches||[];
       panel.append(node('p',matches.length===1?`Camera match: ${matches[0].series} · Season ${matches[0].season} · Disc ${matches[0].disc_number} · ${matches[0].edition}`:`Camera outcome: ${run.recognition.status} · no unique approved match`,'badge'));
-      output(panel,'Machine observation and model result (not a correction)',run.recognition.result);
+       output(panel,'Machine observation and model result (not a correction)',run.recognition.result);
+       const agreement=run.recognition.result?.agreement||{},normalized=agreement.normalized_priority_fields||{};
+       for(const [tag,model] of Object.entries(run.recognition.result?.runs||{})){
+         const details=node('div','','dry-run-block');details.append(node('h4',`Model observation · ${tag}`));
+         output(details,'Original transcription (retained unchanged)',model.transcription||'');
+         output(details,'Normalized identifying fields',normalized[tag]||{});panel.append(details);
+       }
+       output(panel,'Matching decision',{
+         status:agreement.status,reasons:agreement.reasons||[],disagreements:agreement.field_disagreements||[],
+         selected:run.recognition.matches||[],candidate_proofs:agreement.validated_candidates||[],
+         missing:agreement.missing_fields||[],conflicts:agreement.wrong_fields||[]
+       });
       panel.append(node('p',`Comparison target: approved ${master?.series} · Season ${master?.season} · Disc ${disc?.number} · ${master?.edition_name||master?.edition}`,'muted'));
       if(run.correction){panel.append(node('h3','Human correction · separate from camera evidence and masterlist'),node('pre',JSON.stringify(run.correction.fields,null,2)))}
       else{
@@ -53,9 +64,12 @@
       const checks=node('div','','buttons'), makeCheck=label=>{const l=node('label',label),c=document.createElement('input');c.type='checkbox';l.prepend(c);checks.append(l);return c},closed=makeCheck('Tray closed and medium ready'),same=makeCheck('Same insertion as camera capture'),unchanged=makeCheck('No removal/replacement during scan');
       box.append(file,area,checks,action('Attach scan and build proposed files',()=>{if(!closed.checked||!same.checked||!unchanged.checked)throw Error('Confirm tray/medium and same-insertion checks');return request(`/api/dry-run/${run.id}/scan`,{info:area.value,context:{device:'/dev/sr0',capture_event:run.event,tray_closed:true,medium_ready:true,same_insertion:true,media_changed_during_scan:false,operation:'makemkvcon-info-only',media_output_created:false}})}));panel.append(box);
     }
-    if(run.scan){panel.append(node('h3','MakeMKV info-only scan · disc, layout and per-title streams'));output(panel,'Scan summary',run.scan.summary)}
-    if(run.plan){
-      const p=run.plan;panel.append(node('h3','Final proposed files · WOULD BE CREATED · NOT RIP-READY',p.blockers.length?'error':'badge'));
+     if(run.scan){panel.append(node('h3','MakeMKV info-only scan · disc, layout and per-title streams'));output(panel,'Scan summary',run.scan.summary)}
+     if(run.plan){
+       const p=run.plan;panel.append(node('h3','Final proposed files · WOULD BE CREATED · NOT RIP-READY',p.blockers.length?'error':'badge'));
+       if(run.scan&&run.recognition&&!(run.recognition.matches||[]).length&&!run.assessment){
+         panel.append(action('Re-evaluate retained responses (no new inference)',()=>request(`/api/dry-run/${run.id}/reevaluate-recognition`,{})));
+       }
       panel.append(node('p',`Identity source: ${p.identity_source} · ${p.plan_status} · ready_for_ripping=false`));
       if(p.blockers.length)panel.append(node('pre','Blockers:\n'+p.blockers.map(x=>'• '+x).join('\n'),'error'));
       for(const f of p.outputs){const card=node('div','','dry-run-output'),ep=f.episode,content=ep?`Episode ${ep.number}${ep.end?'-'+ep.end:''} · ${ep.title||'title unknown'}`:`Extra · ${f.extra?.title||f.content_name}`;card.append(node('strong',`WOULD BE CREATED · MakeMKV ID ${f.makemkv_id} · DVD title ${f.dvd_title??'unknown'} · requested angle ${f.angle??'MakeMKV default'} · scanned angle count ${f.angle_count??'not reported'}`),node('p',`${master?.series} · Season ${master?.season} · ${content}${f.version?' · '+f.version:''}`),node('p','Filename: '+f.destination.split('/').pop(),'dry-run-files'),node('p','Full local SSD destination: '+f.destination,'dry-run-files'),node('small',`Duration ${f.duration||'unknown'} · chapters ${f.chapters??'unknown'} · size ${f.size||'unknown'} · mapping evidence: ${f.mapping_evidence||'not recorded'}`,'muted'),node('p','Scanned inventory; no output stream is selected or written during this dry run. If executed, the verified persistent MakeMKV +sel:all policy would retain every listed audio/subtitle stream.'));

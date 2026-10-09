@@ -83,7 +83,9 @@ def _languages(streams):
 def build_plan(master, disc, info, destination_root='/media/completed'):
     """Use the ordinary ARM mapping/filename planner, but never create a job."""
     scan_disc = info['disc']
-    titles = info['disc']['titles']
+    # JSON-backed dry-run state converts integer object keys to strings on
+    # persistence. Normalize both fresh parser output and restored state here.
+    titles = {int(tid): title for tid, title in info['disc']['titles'].items()}
     blockers = []
     if scan_disc.get('label') not in (disc.labels or []):
         blockers.append(f"Scanned disc label {scan_disc.get('label')!r} does not match the approved disc labels {disc.labels!r}")

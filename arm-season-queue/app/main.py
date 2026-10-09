@@ -160,6 +160,10 @@ def create_app(settings=None, start_workers=True):
         body = json.loads(await limited(request,2_100_000))
         return await asyncio.to_thread(controller.receive_dry_run_scan,run_id,body.get('info'),body.get('context'))
 
+    @app.post('/api/dry-run/{run_id}/reevaluate-recognition')
+    async def dry_run_reevaluate_recognition(run_id:str):
+        return await asyncio.to_thread(controller.reevaluate_dry_run_recognition,run_id)
+
     @app.post('/api/dry-run/{run_id}/assessment')
     async def dry_run_assessment(run_id:str,request:Request):
         body = json.loads(await limited(request))
