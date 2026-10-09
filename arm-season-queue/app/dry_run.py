@@ -4,6 +4,7 @@ from collections import Counter
 from pathlib import PurePosixPath
 
 from .arm import plan
+from .formats import safe_name
 
 
 LANGUAGE = {'ger':'deu', 'fre':'fra', 'dut':'nld', 'gre':'ell', 'chi':'zho'}
@@ -80,13 +81,29 @@ def _languages(streams):
     return Counter(s.get('language', 'und') for s in streams)
 
 
-def build_plan(master, disc, info, destination_root='/media/completed'):
+def build_plan(master, disc, info, destination_root='/media/completed', *, assignments=None,
+               identity=None, matched=False):
     """Use the ordinary ARM mapping/filename planner, but never create a job."""
     scan_disc = info['disc']
     # JSON-backed dry-run state converts integer object keys to strings on
     # persistence. Normalize both fresh parser output and restored state here.
     titles = {int(tid): title for tid, title in info['disc']['titles'].items()}
     blockers = []
+    # A technical masterlist is an optional mapping aid. It is used only when
+    # the current identity matched (or was human-confirmed) and its complete
+    # approved mapping/inventory validates against this exact scan.
+    if master is None or disc is None:
+        return build_provisional_plan(info, destination_root, assignments=assignments,
+                                      identity=identity,
+                                      uncertainty='No unique compatible technical masterlist mapping is available')
+    if not matched:
+        return build_provisional_plan(info, destination_root, assignments=assignments,
+                                      identity=identity,
+                                      uncertainty='Disc identity has not been uniquely matched or human-confirmed')
+    if not master.approved:
+        return build_provisional_plan(info, destination_root, assignments=assignments,
+                                      identity=identity,
+                                      uncertainty='Reference is descriptive only; technical instructions are not confirmed')
     if scan_disc.get('label') not in (disc.labels or []):
         blockers.append(f"Scanned disc label {scan_disc.get('label')!r} does not match the approved disc labels {disc.labels!r}")
     if info['title_count'] != disc.expected_title_count:
@@ -143,7 +160,83 @@ def build_plan(master, disc, info, destination_root='/media/completed'):
          'reason': 'No approved output mapping for this scanned MakeMKV title'}
         for tid, title in sorted(titles.items()) if tid not in expected_ids
     ]
+    if blockers:
+        return build_provisional_plan(
+            info,destination_root,assignments=assignments,identity=identity,
+            uncertainty='Confirmed mapping was not applied because scan compatibility failed: '+'; '.join(dict.fromkeys(blockers)))
     return {'mode':'DRY RUN ONLY', 'ready_for_ripping':False,
             'plan_status':'blocked' if blockers else 'provisional dry-run preview',
             'blockers':list(dict.fromkeys(blockers)), 'disc':scan_disc,
-            'title_count':info['title_count'], 'outputs':outputs, 'excluded_titles':exclusions}
+            'title_count':info['title_count'], 'outputs':outputs, 'excluded_titles':exclusions,
+            'mapping_source':'confirmed masterlist', 'identity_source':'camera/masterlist match',
+            'selected_titles':outputs, 'mapping_uncertainties':list(dict.fromkeys(blockers))}
+
+
+def build_provisional_plan(info, destination_root='/media/completed', *, assignments=None,
+                           identity=None, uncertainty='Title-to-episode mapping is unresolved'):
+    """Show every scanned source with collision-free ID-based, non-executable names."""
+    assignments = {int(k):v for k,v in (assignments or {}).items()}
+    scan = info['disc']; titles = {int(k):v for k,v in scan['titles'].items()}
+    identity = identity or {}
+    media_type = identity.get('media_type') or 'unknown'
+    series = identity.get('series'); season = identity.get('season')
+    base = PurePosixPath(destination_root)
+    folder = PurePosixPath('provisional')
+    if series and season is not None and media_type in ('unknown','tv'):
+        safe_series = safe_name(str(series))
+        folder = PurePosixPath('tv',safe_series,f'Season {int(season):02d}')
+    elif series:
+        folder = PurePosixPath(safe_name(str(media_type)),safe_name(str(series)))
+    else:
+        label = safe_name(str(scan.get('label') or 'unlabelled-disc'))
+        folder = PurePosixPath('unclassified',f'Disc-{label}')
+    outputs=[]
+    for tid,title in sorted(titles.items()):
+        assignment=assignments.get(tid) or {}
+        episode=assignment.get('episode_number')
+        episode_title=assignment.get('episode_title')
+        label=assignment.get('content_name') or episode_title
+        mapped_for_tv=episode is not None and season is not None and series
+        if mapped_for_tv:
+            stem=f"{safe_name(str(series or 'Unidentified'))} S{int(season):02d}E{int(episode):02d}"
+            if label: stem+=f' - {safe_name(str(label))}'
+            stem+=f' - Source Title {tid:03d} - PROVISIONAL'
+            naming='human job-specific assignment; no reusable mapping created'
+        else:
+            stem=f"Source Title {tid:03d} - PROVISIONAL"
+            if label: stem+=f' - {safe_name(str(label))}'
+            naming='source-title-ID provisional name; episode identity unresolved'
+        destination=str(base/folder/(safe_name(stem)+'.mkv'))
+        outputs.append({'makemkv_id':tid,'dvd_title':title.get('dvd_title'),
+                        'destination':destination,'destination_kind':'would be created',
+                        'content_name':label,'episode':({'number':int(episode),'title':episode_title}
+                                                        if episode is not None else None),
+                        'duration':title.get('duration'),'chapters':title.get('chapters'),
+                        'size':title.get('size'),'angle_count':title.get('angle_count'),
+                        'video':title.get('video'),'audio_streams':title.get('audio',[]),
+                        'subtitle_streams':title.get('subtitles',[]),
+                        'mapping_evidence':naming,'provisional':not bool(mapped_for_tv),
+                        'assignment_source':'human correction' if assignment else 'unresolved'})
+    duplicates=[path for path in {o['destination'] for o in outputs}
+                if sum(o['destination']==path for o in outputs)>1]
+    blockers=[]
+    if not assignments:
+        blockers.append(uncertainty)
+    elif set(assignments) != set(titles):
+        blockers.append('Human assignments do not cover every scanned MakeMKV title; remaining titles keep source-ID provisional names')
+    if media_type in ('movie','music','audiobook'):
+        blockers.append(f'{media_type.title()} ripping is not implemented; this scan is review-only')
+    elif media_type=='tv' and (not series or season is None):
+        blockers.append('TV episode filenames require a human-confirmed series and season')
+    elif media_type=='tv' and any(not (assignments.get(tid) or {}).get('episode_number') for tid in titles):
+        blockers.append('One or more scanned titles still lack a human-confirmed episode assignment')
+    if duplicates:
+        blockers.append('Provisional output names collide; edit assignments before proceeding')
+    return {'mode':'DRY RUN ONLY','ready_for_ripping':False,
+            'plan_status':'blocked' if blockers else 'provisional dry-run preview',
+            'blockers':blockers,'mapping_uncertainties':blockers,
+            'identity':identity,'identity_source':identity.get('source','camera observations'),
+            'mapping_source':'job-specific human assignments' if assignments else 'unresolved; source IDs only',
+            'disc':scan,'title_count':info['title_count'],'outputs':outputs,
+            'selected_titles':outputs,'excluded_titles':[],
+            'unknown_selection':'Every discovered title is shown as a proposal candidate; none is inferred excluded.'}

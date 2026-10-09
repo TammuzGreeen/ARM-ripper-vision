@@ -11,7 +11,7 @@ from uuid import uuid4
 from .arm import ARM, job_identity, plan, structure
 from .agreement import (MODEL_ORDER, evaluate as evaluate_agreement,
                         normalize as normalize_printed, preflight as agreement_preflight)
-from .formats import Masterlist, digest
+from .formats import Masterlist, digest, rip_readiness
 from .dry_run import build_plan as build_dry_run_plan, parse_info
 from .handover import beneath, canonical, inspect_file, publish_json
 from .recognition import match
@@ -125,7 +125,7 @@ class Controller:
                 'camera_mode':self.s.camera_mode,'fileflows_enabled':self.s.fileflows_enabled,
                 'ready':bool(arm.get('ready') and models.get('ready') and not storage_issues)}
 
-    def activate(self, master_id):
+    def activate(self, master_id=None):
         with self.lock:
             if self.s.dry_run_only:
                 raise ValueError('This deployment is locked to dry-run mode; ARM jobs cannot be configured or started')
@@ -139,18 +139,23 @@ class Controller:
             self.db.put('preflight',report)
             if report['issues']:
                 raise ValueError('; '.join(report['issues']))
-            master = next((m for m in self.masters() if m.id==master_id),None)
-            if master is None or not master.approved:
-                raise ValueError('Import and approve this masterlist first')
+            master = next((m for m in self.masters() if m.id==master_id),None) if master_id else None
+            if master_id and master is None:
+                raise ValueError('Optional batch context does not identify a loaded reference')
+            if master is not None and not master.approved:
+                raise ValueError('Optional batch context must use confirmed technical instructions; leave it empty for unrestricted recognition')
             self.baseline()
             return self.select_batch(master)
 
     def select_batch(self, master):
-        existing = [r for r in self.db.rows("SELECT * FROM batches WHERE state!='cancelled'") if digest(json.loads(r['master']))==digest(master)]
+        batch_identity=digest(master) if master else digest({'batch_context':None})
+        existing = [r for r in self.db.rows("SELECT * FROM batches WHERE state!='cancelled'")
+                    if digest(json.loads(r['master']))==batch_identity]
         batch = existing[0]['id'] if existing else str(uuid4())
         with self.db.connect() as db:
             db.execute("UPDATE batches SET state='paused' WHERE state='running'")
-            db.execute('INSERT OR REPLACE INTO batches VALUES (?,?,?)',(batch,master.model_dump_json(),'running'))
+            snapshot=master.model_dump_json() if master else json.dumps({'schema_version':1,'batch_context':None})
+            db.execute('INSERT OR REPLACE INTO batches VALUES (?,?,?)',(batch,snapshot,'running'))
         self.db.put('active_batch',batch)
         return batch
 
@@ -172,7 +177,7 @@ class Controller:
             return
         self.db.execute('UPDATE events SET released=1 WHERE id=?',(event,))
 
-    def start_dry_run(self, master_id, disc_id):
+    def start_dry_run(self, master_id=None, disc_id=None):
         with self.lock:
             if not self.s.dry_run_only:
                 raise ValueError('DRY_RUN_ONLY must be enabled before beginning a supervised dry run')
@@ -181,44 +186,84 @@ class Controller:
             if self.db.get('active_batch') or self.db.rows("SELECT 1 FROM reservations WHERE state NOT IN ('failed','cancelled')"):
                 raise ValueError('A production batch or reservation exists; dry run refused')
             current = self.db.get('active_dry_run')
-            if current and current.get('status') not in ('assessed','abandoned'):
-                raise ValueError('Finish or explicitly abandon the current dry run first')
+            if current:
+                if current.get('status') not in ('assessed','abandoned','superseded'):
+                    if not current.get('scan') or not current.get('plan'):
+                        raise ValueError('Complete the current capture and information-only scan before starting the next disc')
+                    current['status']='superseded'
+                    current['superseded_at']=time.time()
+                    current['superseded_reason']='Next unrestricted disc dry run started; no assessment was implied'
+                history=self.db.get('dry_run_history',[])
+                if not any(row.get('id')==current.get('id') for row in history):
+                    history.append(current)
+                    self.db.put('dry_run_history',history)
             readiness = self.arm.inspect()
             self.db.put('preflight', readiness)
             if readiness['issues']:
                 raise ValueError('; '.join(readiness['issues']))
-            if self.arm.jobs():
-                raise ValueError('ARM has jobs; dry run requires an empty job queue')
+            jobs=self.arm.jobs()
+            selected=next((d for d in readiness.get('drives',[]) if d.get('mount')==self.s.drive),None)
+            current=selected.get('job_id_current') if selected else None
+            current_job=next((j for j in jobs if j.get('job_id')==current),None) if current is not None else None
+            terminal={'fail','success','cancelled'}
+            if current_job and (current_job.get('status') not in terminal|{'manual_paused'}
+                                or current_job.get('manual_start') is True):
+                raise ValueError('ARM has a non-terminal or start-requested drive job; dry run refused')
+            if current is None and any(j.get('status') not in terminal for j in jobs):
+                raise ValueError('ARM has an active job without a matching drive association; dry run refused')
+            if current is not None and current_job is None:
+                raise ValueError('ARM current drive job is missing from the complete job listing')
             models = agreement_preflight(self.s)
             self.db.put('agreement_preflight', models)
             if not models['ready']:
                 raise ValueError('Configured recognition pipeline is not ready: ' + '; '.join(models['issues']))
-            master = next((m for m in self.masters() if m.id == master_id and m.approved), None)
+            master = next((m for m in self.masters() if m.id == master_id), None) if master_id else None
             disc = next((d for d in master.discs if d.id == disc_id), None) if master else None
-            if not master or not disc:
-                raise ValueError('Choose an approved masterlist and one of its discs')
+            if (master_id or disc_id) and (not master or not disc):
+                raise ValueError('Optional masterlist context must identify an existing list and disc')
             if self.s.recognition_backend != 'ollama-agreement':
                 raise ValueError('Dry run requires the configured production agreement recognition pipeline')
             run = {'id':str(uuid4()), 'status':'awaiting_capture', 'created':time.time(),
-                   'master':master_id, 'masterlist_sha256':digest(master), 'disc':disc_id,
+                   'context':({'master':master_id,'masterlist_sha256':digest(master),'disc':disc_id}
+                              if master else None),
                    'assessment':None, 'recognition':None, 'correction':None, 'scan':None, 'plan':None}
             self.db.put('active_dry_run', run)
             return run
 
     def save_dry_run_correction(self, run_id, correction):
-        allowed = {'series','season','disc_number','episodes','titles','edition','notes'}
+        allowed = {'series','season','disc_number','episodes','titles','edition','notes',
+                   'media_type','assignments'}
         if not isinstance(correction, dict) or set(correction)-allowed:
             raise ValueError('Unsupported dry-run correction fields')
         with self.lock:
             run = self._dry_run(run_id)
             if run.get('status') not in ('review','scan_received','plan_blocked'):
                 raise ValueError('Corrections are available only after camera recognition has completed')
-            if not all(str(correction.get(k,'')).strip() for k in ('series','season','disc_number','episodes','notes')):
-                raise ValueError('An authoritative correction requires series, season, disc number, episodes and review notes')
-            master, disc = self._dry_run_master(run)
-            if not self._correction_matches_disc(correction, master, disc):
-                raise ValueError('Human correction conflicts with the approved masterlist/disc selected for this dry run')
-            run['correction'] = {'source':'human', 'entered_at':time.time(), 'fields':correction}
+            if not str(correction.get('notes','')).strip():
+                raise ValueError('A job-specific correction requires review notes')
+            assignments=correction.get('assignments') or {}
+            if not isinstance(assignments,dict):
+                raise ValueError('Title assignments must be an object keyed by scanned MakeMKV ID')
+            scan_ids={str(k) for k in ((run.get('scan') or {}).get('info') or {}).get('disc',{}).get('titles',{})}
+            if assignments and not scan_ids:
+                raise ValueError('Attach the information-only scan before assigning source titles')
+            normalized={}
+            for key,value in assignments.items():
+                if str(key) not in scan_ids or not isinstance(value,dict):
+                    raise ValueError('Assignment references an unknown scanned source title')
+                if set(value)-{'episode_number','episode_title','content_name'}:
+                    raise ValueError('Unsupported source-title assignment field')
+                episode=value.get('episode_number')
+                if episode not in (None,''):
+                    try: episode=int(episode)
+                    except (TypeError,ValueError): raise ValueError('Episode number must be numeric')
+                    if not 1<=episode<=999: raise ValueError('Episode number is outside supported range')
+                    value={**value,'episode_number':episode}
+                normalized[str(key)]=value
+            fields={k:v for k,v in correction.items() if k!='assignments'}
+            run['correction'] = {'source':'human', 'authority':'human_verified_for_current_job',
+                                 'entered_at':time.time(), 'fields':fields,
+                                 'assignments':normalized}
             run['status'] = 'scan_received' if run.get('scan') else 'review'
             if run.get('scan'):
                 self._rebuild_dry_run_plan(run)
@@ -271,27 +316,101 @@ class Controller:
         return run
 
     def _dry_run_master(self, run):
-        master = next((m for m in self.masters() if m.id == run['master']), None)
-        disc = next((d for d in master.discs if d.id == run['disc']), None) if master else None
-        if not master or digest(master) != run['masterlist_sha256'] or not disc:
-            raise ValueError('Approved masterlist changed during dry run; plan invalidated')
-        return master, disc
+        """Resolve the uniquely matched reference; retain support for old saved runs."""
+        matches=(run.get('recognition') or {}).get('matches') or []
+        # Old records stored a selected master directly. It is a hint only and
+        # becomes applicable only if recognition independently matched it.
+        selected=matches[0] if len(matches)==1 else None
+        correction=run.get('correction') or {}
+        if selected is None and correction.get('source')=='human':
+            fields=correction.get('fields') or {}
+            series=normalize_printed(str(fields.get('series') or ''))
+            try: season=int(fields.get('season'))
+            except (TypeError,ValueError): season=None
+            try: number=int(fields.get('disc_number'))
+            except (TypeError,ValueError): number=None
+            observed=set()
+            for part in re.split(r'\s*[,;/]\s*',str(fields.get('episodes') or '')):
+                found=re.fullmatch(r'\s*(\d{1,3})(?:\s*[-–—−]\s*(\d{1,3}))?\s*',part)
+                if found: observed.update(range(int(found[1]),int(found[2] or found[1])+1))
+            hits=[]
+            for m in self.masters():
+                aliases={normalize_printed(m.series),*(normalize_printed(a) for a in m.title_aliases)}
+                if not series or series not in aliases or season is None or m.season!=season: continue
+                for d in m.discs:
+                    if number is not None and d.number!=number: continue
+                    expected=set()
+                    for ep in d.episodes:
+                        found=re.fullmatch(r'\s*(\d{1,3})(?:\s*[-–—−]\s*(\d{1,3}))?\s*',ep.printed)
+                        if found: expected.update(range(int(found[1]),int(found[2] or found[1])+1))
+                    if observed and expected and observed!=expected: continue
+                    hits.append((m,d))
+            if len(hits)==1:
+                m,d=hits[0]
+                selected={'master':m.id,'disc':d.id,'masterlist_sha256':digest(m)}
+        master=next((m for m in self.masters() if m.id==selected.get('master')),None) if selected else None
+        if master and selected.get('masterlist_sha256') and digest(master)!=selected.get('masterlist_sha256'):
+            raise ValueError('Matched descriptive reference changed during dry run; rematch against the current version')
+        disc=next((d for d in master.discs if d.id==selected.get('disc')),None) if master else None
+        if master and not disc:
+            raise ValueError('Matched reference disc no longer exists')
+        return master,disc
 
     def _rebuild_dry_run_plan(self, run):
         master, disc = self._dry_run_master(run)
         recognition = run.get('recognition') or {}
         matches = recognition.get('matches') or []
-        matched = len(matches) == 1 and matches[0].get('master') == master.id and matches[0].get('disc') == disc.id
-        human = run.get('correction') and run['correction'].get('source') == 'human'
-        blockers = []
-        if not matched and not human:
-            blockers.append('Camera recognition has no unique match to this approved masterlist disc; manual review required')
-        output = build_dry_run_plan(master, disc, run['scan']['info'], self.s.dry_run_output_root)
-        output['identity_source'] = 'human correction' if human and not matched else 'camera agreement' if matched else 'unresolved camera result'
-        output['camera_matches'] = matches
-        output['human_correction'] = run.get('correction')
-        output['blockers'] = list(dict.fromkeys(blockers + output['blockers']))
-        output['plan_status'] = 'blocked' if output['blockers'] else 'provisional dry-run preview'
+        scan_resolved=False
+        agreement=(recognition.get('result') or {}).get('agreement') or {}
+        reference=agreement.get('reference_match') or {}
+        if master is None and reference.get('status')=='ambiguous' and not run.get('correction'):
+            compatible=[]
+            for candidate in reference.get('candidates',[]):
+                m=next((item for item in self.masters() if item.id==candidate.get('master')),None)
+                d=next((item for item in m.discs if item.id==candidate.get('disc')),None) if m else None
+                if not m or not d or not m.approved: continue
+                try:
+                    check=build_dry_run_plan(m,d,run['scan']['info'],self.s.dry_run_output_root,matched=True)
+                except ValueError:
+                    continue
+                if not check.get('blockers') and check.get('mapping_source')=='confirmed masterlist':
+                    compatible.append((m,d))
+            if len(compatible)==1:
+                master,disc=compatible[0]
+                scan_resolved=True
+        correction=run.get('correction') or {}
+        fields=correction.get('fields') or {}
+        identity={'media_type':fields.get('media_type') or ('tv' if fields.get('season') is not None else None),
+                  'series':fields.get('series'),'season':fields.get('season'),
+                  'disc_number':fields.get('disc_number'),'episodes':fields.get('episodes'),
+                  'source':'human correction' if correction else 'camera observations'}
+        if not correction and master and (len(matches)==1 or scan_resolved):
+            identity.update(media_type='tv',series=master.series,season=master.season,
+                            disc_number=disc.number,source='camera/reference match')
+        elif not correction:
+            parsed=((recognition.get('result') or {}).get('agreement') or {}).get('normalized_priority_fields') or {}
+            primary=parsed.get(MODEL_ORDER[0],{})
+            identity.update(series=(primary.get('series') or [None])[0],
+                            season=(primary.get('seasons') or [None])[0],
+                            disc_number=(primary.get('disc_numbers') or [None])[0],
+                            episodes=primary.get('episodes'))
+        trusted_match=bool(master and disc and not correction.get('assignments')
+                           and (len(matches)==1 or correction.get('source')=='human' or scan_resolved))
+        output = build_dry_run_plan(master,disc,run['scan']['info'],self.s.dry_run_output_root,
+                                    assignments=correction.get('assignments'),identity=identity,
+                                    matched=trusted_match)
+        output['camera_matches']=matches
+        output['reference_match']=(reference or
+                                   {'status':'none','candidate_count':0,'candidates':[]})
+        output['scan_resolution']=({'status':'unique compatible confirmed mapping',
+                                    'master':master.id,'disc':disc.id,
+                                    'basis':'MakeMKV title IDs, DVD titles and per-title stream inventory matched this candidate'}
+                                   if scan_resolved else None)
+        confirmed=bool(master and disc and master.approved and not rip_readiness(master,disc))
+        output['reference_metadata']={'master':master.model_dump() if master else None,
+                                      'trust':'confirmed technical instructions' if confirmed else 'descriptive metadata only; technical mapping unverified' if master else 'no compatible reference'}
+        output['batch_context']=run.get('context') or ({'master':run.get('master'),'disc':run.get('disc')} if run.get('master') else None)
+        output['human_correction']=correction or None
         run['plan'] = output
         run['status'] = 'review'
 
@@ -373,26 +492,14 @@ class Controller:
             return False
         agreement = result.get('agreement') or {}
         runs = result.get('runs') or {}
-        proofs = agreement.get('validated_candidates') or []
-        proof_fields = [proof.get(name) or {} for proof in proofs for name in ('primary','secondary')]
-        proof_ok = (len(proofs) == 1 and len(proof_fields) == 2
-                    and all(all((not field.get('required', True)) or field.get('status') == 'CORRECT'
-                                for field in proof.values())
-                              and all(name in proof for name in ('series','season','episodes','titles'))
-                              for proof in proof_fields))
-        matches = result.get('matches') or []
-        match_ok = (len(matches) == 1 and len(proofs) == 1
-                    and matches[0].get('master') == proofs[0].get('master')
-                    and matches[0].get('disc') == proofs[0].get('disc')
-                    and isinstance(matches[0].get('masterlist_sha256'), str))
         return (self.s.recognition_backend == 'ollama-agreement'
                 and tuple(result.get('model_tags') or ()) == MODEL_ORDER
                 and set(runs) == set(MODEL_ORDER)
                 and all(runs.get(tag, {}).get('usable') for tag in MODEL_ORDER)
                 and agreement.get('status') == 'PASS' and agreement.get('accepted') is True
-                and result.get('accepted') is True and match_ok
+                and result.get('accepted') is True
                 and not agreement.get('reasons') and not agreement.get('field_disagreements')
-                and not agreement.get('operational_failures') and proof_ok)
+                and not agreement.get('operational_failures'))
 
     @staticmethod
     def human_retry_authorized(recognition):
@@ -458,34 +565,23 @@ class Controller:
         results = self.masters()
         agreement = result.get('agreement') or {}
         runs = result.get('runs') or {}
-        candidate_proofs = agreement.get('validated_candidates') or []
-        proof_fields = [proof.get(model_name) or {} for proof in candidate_proofs
-                        for model_name in ('primary', 'secondary')]
-        complete_proof = (len(candidate_proofs) == 1 and len(proof_fields) == 2
-                          and all(all((not field.get('required', True)) or field.get('status') == 'CORRECT'
-                                      for field in proof.values())
-                                  and all(name in proof for name in ('series', 'season', 'episodes', 'titles'))
-                                  for proof in proof_fields))
         exact_pair = (result.get('policy') == 'two-model-priority-field-agreement-v1'
                       and tuple(result.get('model_tags') or ()) == MODEL_ORDER
                       and set(runs) == set(MODEL_ORDER)
                       and all(runs.get(tag, {}).get('usable') for tag in MODEL_ORDER))
-        matches = result.get('matches', []) if (
+        model_agreement = (
             self.s.recognition_backend == 'ollama-agreement'
             and exact_pair and agreement.get('status') == 'PASS'
             and agreement.get('accepted') is True and not agreement.get('reasons')
             and not agreement.get('field_disagreements') and not agreement.get('operational_failures')
-            and complete_proof
-        ) else []
+        )
+        matches = result.get('matches', []) if model_agreement else []
         if matches:
             valid_matches = []
             for item in matches:
-                master = next((m for m in results if m.id == item.get('master') and m.approved), None)
+                master = next((m for m in results if m.id == item.get('master')), None)
                 disc = next((d for d in master.discs if d.id == item.get('disc')), None) if master else None
-                proof_match = (len(candidate_proofs) == 1
-                               and candidate_proofs[0].get('master') == item.get('master')
-                               and candidate_proofs[0].get('disc') == item.get('disc'))
-                if master and disc and proof_match and item.get('masterlist_sha256') == digest(master):
+                if master and disc and item.get('masterlist_sha256') == digest(master):
                      valid_matches.append(item)
             matches = valid_matches
         event_rows = self.db.rows('SELECT body,status,created FROM events WHERE id=?',(event,))
@@ -504,21 +600,14 @@ class Controller:
             run['status'] = 'review'
             self.db.put('active_dry_run',run)
             return
-        pass_result = len(matches) == 1
+        matched_reference = next((m for m in results if matches and m.id==matches[0].get('master')),None)
+        pass_result = bool(model_agreement and len(matches)==1 and matched_reference and matched_reference.approved)
         automatic_source = result.get('camera') is not None or result.get('backend') == 'ollama-agreement'
-        status = 'ready' if pass_result else 'rejected_for_review' if automatic_source else 'review'
-        if not pass_result and status == 'rejected_for_review':
+        status = 'ready' if pass_result else 'review'
+        if not model_agreement and automatic_source:
             result['accepted'] = False
-            if agreement.get('status') == 'PASS':
-                agreement['status'] = 'REJECTED_FOR_REVIEW'
-                agreement['accepted'] = False
-                invalid_runs = [tag for tag in MODEL_ORDER if not runs.get(tag, {}).get('usable')]
-                if invalid_runs:
-                    agreement['operational_failures'] = sorted(set(agreement.get('operational_failures', []) + invalid_runs))
-                    agreement.setdefault('reasons', []).append('operational_recognition_failure')
-                agreement.setdefault('reasons', []).append('controller_fail_closed_validation')
-            if not result.get('reason') or result.get('reason') == 'Both models agree on all required priority fields':
-                result['reason'] = 'Agreement-only priority-field validation failed; rejected for manual review'
+            if not result.get('reason'):
+                result['reason'] = 'Recognition observations need review; scanning and per-title planning may continue'
         create_rejection = False
         with self.db.connect() as db:
             old = db.execute('SELECT body,status,created FROM events WHERE id=?',(event,)).fetchone()
@@ -964,8 +1053,21 @@ class Controller:
             body['result']['reason'] = 'Stored recognition does not contain a complete exact-model agreement proof; automatic rip blocked'
             self.db.execute("UPDATE events SET status='review',body=? WHERE id=?", (encode(body),event['id']))
             return
+        if len(body.get('matches') or [])!=1:
+            body['result']['reason']='Model observations are reviewable, but no unique reference supplies confirmed technical instructions; complete a job-specific mapping before dispatch'
+            self.db.execute("UPDATE events SET status='review',body=? WHERE id=?",(encode(body),event['id']))
+            return
         matched = body['matches'][0]
-        master = Masterlist.model_validate_json(batch['master'])
+        batch_snapshot=json.loads(batch['master'])
+        if not batch_snapshot.get('discs'):
+            candidate=next((m for m in self.masters() if m.id==matched.get('master')),None)
+            if not candidate or not candidate.approved:
+                body['result']['reason']='The optional batch has no masterlist context and the unique reference is descriptive only; confirmed technical mapping and current-job review are required'
+                self.db.execute("UPDATE events SET status='review',body=? WHERE id=?",(encode(body),event['id']))
+                return
+            batch={'id':self.select_batch(candidate)}
+            batch_snapshot=candidate.model_dump()
+        master = Masterlist.model_validate(batch_snapshot)
         if matched['master']==master.id and matched.get('masterlist_sha256')!=digest(master):
             body['result']['reason']='Recognition matched an edited masterlist, not this batch snapshot; cancel this batch and start the updated list'
             self.db.execute("UPDATE events SET status='review',body=? WHERE id=?",(encode(body),event['id']))
@@ -1116,6 +1218,9 @@ class Controller:
         dry_run = self.db.get('active_dry_run')
         if dry_run and dry_run.get('event'):
             protected.add(dry_run['event'])
+        for prior in self.db.get('dry_run_history',[]):
+            if prior.get('event'):
+                protected.add(prior['event'])
         for row in self.db.rows('SELECT id FROM events WHERE created<? AND id NOT IN (SELECT event FROM reservations)',(cutoff,)):
             if row['id'] in protected:
                 continue
@@ -1175,5 +1280,6 @@ class Controller:
                 'preflight':self.db.get('preflight'),
                 'agreement_preflight':self.db.get('agreement_preflight'),
                  'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled,
-                 'dry_run_only':self.s.dry_run_only,
-                 'dry_run':self.db.get('active_dry_run')}
+                'dry_run_only':self.s.dry_run_only,
+                 'dry_run':self.db.get('active_dry_run'),
+                 'dry_run_history':self.db.get('dry_run_history',[])}

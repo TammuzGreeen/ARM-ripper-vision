@@ -27,6 +27,7 @@ DISC_STATUS = 0x5327        # CDROM_DISC_STATUS
 MEDIA_CHANGED = 0x5325      # CDROM_MEDIA_CHANGED
 CLOSE_TRAY = 0x5319         # CDROMCLOSETRAY
 DATA_MEDIA_STATUSES = {4, 101, 102, 103, 104, 105}
+TERMINAL_ARM_STATUSES = {'success', 'fail', 'cancelled'}
 
 
 def api_json(base, path):
@@ -39,12 +40,24 @@ def held_current_job(drives, jobs, device):
     if len(selected) != 1:
         raise RuntimeError('Configured ARM drive is missing or ambiguous')
     current = selected[0].get('job_id_current')
-    if not jobs and current is None:
+    active=[job for job in jobs if job.get('status') not in TERMINAL_ARM_STATUSES]
+    if current is None:
+        if active:
+            raise RuntimeError('ARM has active jobs without a current drive association; info scan refused')
         return None
-    if (len(jobs) != 1 or current is None or jobs[0].get('job_id') != current
-            or jobs[0].get('status') != 'manual_paused' or jobs[0].get('manual_start') is not False):
-        raise RuntimeError('ARM must have no jobs or exactly one current manual_paused job with no start request')
-    return jobs[0]
+    current_rows=[job for job in jobs if job.get('job_id')==current]
+    if len(current_rows)!=1:
+        raise RuntimeError('ARM current drive job is missing or ambiguous in the job listing')
+    job=current_rows[0]
+    if job.get('status')=='manual_paused' and job.get('manual_start') is False:
+        if any(other is not job for other in active):
+            raise RuntimeError('ARM has another active non-manual_paused job; info scan refused')
+        return job
+    if job.get('status') in TERMINAL_ARM_STATUSES and job.get('manual_start') is not True:
+        if active:
+            raise RuntimeError('ARM has other active jobs; info scan refused')
+        return job
+    raise RuntimeError('ARM drive job is not terminal or safely manual_paused with no start request')
 
 
 def check_arm(base, device):
@@ -206,9 +219,11 @@ def main():
                '--entrypoint','/opt/makemkv/bin/makemkvcon',a.makemkv_image,
                '-r','info','--cache=1','dev:/dev/sr0','--minlength=0']
         print('Operation: MakeMKV info only; network disabled; no media output path is mounted.')
-        print('ARM global pause was verified; any current ARM job was required to be manual_paused with no start request. No ARM scan route was called.')
         if arm_state['held_job']:
-            print('ARM held job:',arm_state['held_job'].get('job_id'),'manual_paused')
+            print('ARM global pause was verified; current job:',
+                  arm_state['held_job'].get('job_id'),arm_state['held_job'].get('status'))
+        else:
+            print('ARM global pause was verified; no current job. No ARM scan route was called.')
         print(f'Private report: {report}')
         scan(cmd, report, a.device, a.scan_timeout, a.arm_api)
         if drive_ioctl(a.device, MEDIA_CHANGED):

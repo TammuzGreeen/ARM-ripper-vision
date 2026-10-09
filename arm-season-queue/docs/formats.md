@@ -69,7 +69,7 @@ Original/remastered effects can use separate masterlists and different edition s
 
 ## Recognition evidence
 
-An event has a UUID, creation time, input source, released flag, optional unique ARM job ID, status and structured body. `result.frames[]` retains cropped JPEG references, raw OCR text, word-filtered confidence, detected rotation, season/disc, conflicts, episode numbers/ranges/titles, title/edition candidates, barcodes, catalogue candidates and language words. `result.accepted` means extraction consensus, not a guessed metadata provider match. `matches[]` is produced afterwards against all approved lists.
+An event has a UUID, creation time, input source, released flag, optional unique ARM job ID, status and structured body. `result.frames[]` retains cropped JPEG references, raw OCR text, word-filtered confidence, detected rotation, season/disc, conflicts, episode numbers/ranges/titles, title/edition candidates, barcodes, catalogue candidates and language words. `result.accepted` means observation agreement, not a masterlist match or executable plan. Optional `reference_match` reports none/unique/ambiguous candidates and their trust; `matches[]` contains only a unique compatible reference. Draft references may enrich descriptive metadata but cannot supply technical instructions. No recognition path creates or changes a masterlist.
 
 Typical lifecycle:
 

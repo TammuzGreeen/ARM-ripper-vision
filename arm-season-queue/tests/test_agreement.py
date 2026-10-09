@@ -79,9 +79,9 @@ class AgreementGateTests(unittest.TestCase):
         first = self.transcript()
         second = 'Star Trek Deep Space Nine\nSeason 2\nDisc 1\nTeil 1'
         result = self.result(first, second)
-        self.assertFalse(result['accepted'])
+        self.assertTrue(result['accepted'])
         self.assertFalse(any(item['field'] == 'episodes' for item in result['field_disagreements']))
-        self.assertIn('missing_required_priority_fields', result['reasons'])
+        self.assertIn(MODEL_ORDER[1],result['missing_observations'])
         self.assertEqual(result['normalized_priority_fields'][MODEL_ORDER[1]]['episodes'], [])
 
     def test_different_explicit_episode_ranges_remain_a_real_disagreement(self):
@@ -99,11 +99,12 @@ class AgreementGateTests(unittest.TestCase):
                 text = self.transcript().replace('Season 2', season).replace('Disc 1', disc)
                 self.assertTrue(self.result(text)['accepted'])
 
-    def test_both_models_agree_on_wrong_disc_number_and_wrong_season_reject(self):
+    def test_wrong_disc_number_or_season_remains_recognized_but_unmatched(self):
         for text in (self.transcript(disc=2), self.transcript(season=3)):
             with self.subTest(text=text):
                 result = self.result(text)
-                self.assertFalse(result['accepted'])
+                self.assertTrue(result['accepted'])
+                self.assertEqual(result['reference_match']['status'],'none')
                 self.assertEqual(result['matches'], [])
 
     def test_model_disagreement_rejects_even_with_a_correct_side(self):
@@ -111,20 +112,21 @@ class AgreementGateTests(unittest.TestCase):
         self.assertFalse(result['accepted'])
         self.assertTrue(result['field_disagreements'])
 
-    def test_ambiguous_approved_editions_reject(self):
+    def test_ambiguous_reference_candidates_do_not_reject_model_agreement(self):
         other = master().model_copy(update={'id': 'duplicate-edition'})
         result = evaluate({tag: self.transcript() for tag in MODEL_ORDER},
                           {tag: {'usable': True} for tag in MODEL_ORDER}, [master(), other])
-        self.assertFalse(result['accepted'])
-        self.assertIn('conflicting_or_ambiguous_edition_identifiers', result['reasons'])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['reference_match']['status'],'ambiguous')
 
-    def test_no_approved_masterlist_is_not_a_match(self):
+    def test_no_masterlist_match_is_a_normal_recognition_result(self):
         result = evaluate({tag: self.transcript() for tag in MODEL_ORDER},
                           {tag: {'usable': True} for tag in MODEL_ORDER}, [])
-        self.assertFalse(result['accepted'])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['reference_match']['status'],'none')
         self.assertEqual(result['matches'], [])
 
-    def test_conflicting_explicit_edition_tokens_reject_even_when_content_is_unique(self):
+    def test_ambiguous_explicit_edition_tokens_are_reference_uncertainty(self):
         original = master()
         other = original.model_copy(update={
             'id': 'alternate-edition', 'edition': 'de-dvd-s02-alt',
@@ -132,10 +134,10 @@ class AgreementGateTests(unittest.TestCase):
         text = self.transcript() + '\nTeil 2'
         result = evaluate({tag: text for tag in MODEL_ORDER},
                           {tag: {'usable': True} for tag in MODEL_ORDER}, [original, other])
-        self.assertFalse(result['accepted'])
-        self.assertEqual(result['matches'], [])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['reference_match']['status'],'ambiguous')
 
-    def test_conflicting_printed_disc_identifiers_reject(self):
+    def test_multiple_printed_identifier_candidates_are_reference_uncertainty(self):
         original = master()
         original_disc = original.discs[0].model_copy(update={'printed_identifiers': ['LABEL ONE']})
         original = original.model_copy(update={'discs': [original_disc, *original.discs[1:]]})
@@ -147,8 +149,8 @@ class AgreementGateTests(unittest.TestCase):
         text = self.transcript() + '\nLABEL ONE\nLABEL TWO'
         result = evaluate({tag: text for tag in MODEL_ORDER},
                           {tag: {'usable': True} for tag in MODEL_ORDER}, [original, other])
-        self.assertFalse(result['accepted'])
-        self.assertEqual(result['matches'], [])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['reference_match']['status'],'ambiguous')
 
 
 if __name__ == '__main__':

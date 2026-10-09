@@ -1,6 +1,6 @@
 # arm-season-queue
 
-A local-first USB-camera companion for season-based ARM Neu ripping. You supply and supplement the masterlist. The camera adds confidence about the presented medium’s identity and printed contents by checking them against your list; it never generates or updates masterlist entries. Discrepancies require your review. Select an approved season, present a disc, remove it from the camera view, insert it, and repeat. ARM and FileFlows remain separate applications.
+A local-first USB-camera companion for season-based ARM Neu ripping. Masterlists are optional recognition and mapping aids: you may present an unfamiliar disc without selecting a target first. Recognition observations, descriptive reference metadata, confirmed technical mappings, current-disc identity and plan executability are tracked separately. No-match is a normal reviewable result; the camera never creates or updates masterlists. ARM and FileFlows remain separate applications.
 
 **Implementation status:** application, local webcam/OCR pipeline, browser interface, transactional queue, source-specific ARM adapter, Docker/TrueNAS example, and durable FileFlows handover helper are included. **This has not been deployed or tested against a physical webcam, ARM installation, or FileFlows installation.** No direct TrueNAS access was used. See [test report](docs/live-test-report.md).
 
@@ -15,7 +15,7 @@ The adapter currently targets inspected ARM Neu **19.1.0**, reference commit `f6
 - Manual camera testing with explicit **View is empty** and **Capture disc now** controls. Repeat snapshots without restarting; test evidence never authorizes ripping. See [camera controls](docs/camera.md).
 
 - Linux V4L2 USB camera capture, cropped live MJPEG preview, camera status, stable/sharp three-frame capture, local Tesseract German/English/French/Spanish OCR, four rotations, local contrast enhancement and optional ZBar barcodes. Season/disc/episode field labels are normalized for parsing only; original transcription, series/episode titles, release identifiers and edition matching remain unchanged.
-- Recognition extraction before matching. Multiple frames must agree on printed season/disc numbers and a unique approved title/edition. Unreadable, conflicting, unrelated or ambiguous evidence opens a concise review.
+- Recognition observations are evaluated independently from optional reference matching. Model agreement does not require a masterlist match; ambiguity or genuine observation conflicts remain visible for review. Only compatible confirmed technical mappings can provide reusable title-to-episode instructions.
 - User-maintained v1/v2 JSON/YAML masterlists. Metadata-only v2 drafts support review before technical scans; ripping still requires explicit scan-backed title mappings, inventories and output checks. MakeMKV/DVD-title/ARM-track identifiers remain separate, including out-of-order discs and separate editions.
 - SQLite transactions, durable insertion associations, one active batch, retry/skip/cancel, independent rip and publication progress, protected evidence and restart recovery.
 - Existing ARM APIs for per-job pause, metadata, track selection, names, preview and explicit start. No ARM database access or patches.
@@ -75,8 +75,8 @@ Global pause applies to that ARM instance, including unrelated new jobs, so use 
 1. Open `http://<configured-address>:8080`, authenticate, and run **Check ARM connection**.
 2. The Borgia/Voyager examples under `examples/masterlist-drafts/` are v2 metadata-only drafts and can be imported for recognition/review; they remain `approved: false` and technically blocked from ripping. Copy a candidate to private storage, preserve unresolved notes and provenance, and establish scan-backed selection/mappings/inventory before execution. The older DS9 YAML is a separate legacy example, not the Borgia test masterlist.
 3. Clear the camera view and select **Calibrate empty view**. Do this after moving the camera or changing the background/light. Calibration is intentionally required after a camera reconnect or service restart.
-4. Select the season once and start the batch. Existing ARM jobs are baselined and cannot consume a fresh capture automatically.
-5. Present the printed disc face (or relevant cover/insert) with title, season, disc and edition visible. In agreement mode, wait for both recognizers and the approved-list match. If rejected, do not insert: use Manual Review and either leave it rejected or complete the explicit fresh-capture human-review path below. Captures expire after 180 seconds by default. For a passing automatic capture, remove it from view and insert it into ARM; the association is retained if OCR finishes after insertion.
+4. Optionally select a confirmed season context and start a batch, or leave context empty for unrestricted recognition. A context is only a hint; it cannot force another disc into that identity. Existing ARM jobs are baselined and cannot consume a fresh capture automatically.
+5. Present the printed disc face (or relevant cover/insert). In agreement mode, wait for both recognizers; a missing reference match does not prevent dry-run scanning and planning. Captures expire after 180 seconds by default. Do not dispatch an unmatched disc without a compatible confirmed technical mapping and the ordinary review/readiness checks.
 6. Watch rip and publication independently. A FileFlows delivery can finish while the next disc is being ripped. A different unprocessed disc in the same season uses its own entry, not the next position.
 
 ## Supervised production-like dry run
@@ -89,11 +89,13 @@ dispatch authorizations, reservation polling, and ARM start/configuration. It
 does not edit ARM's global pause. The dry-run record is separate from production
 reservations and does not mark episodes complete.
 
-Use the GUI's **Production-like dry run** panel. It starts a fresh record; after
-you clear the camera/tray and calibrate the empty view, the existing automatic
-three-frame camera pipeline runs against approved masterlists. A human correction
-is stored separately and cannot change masterlist mappings or bypass scan and
-readiness blockers. Attach a report made by the host-side
+Use the GUI's **Production-like dry run** panel. It starts an unrestricted fresh
+record; after you clear the camera/tray and calibrate the empty view, the
+three-frame camera pipeline runs without requiring a selected masterlist. A
+compatible confirmed entry may enrich the result; no match, ambiguous candidates
+or descriptive-only drafts continue to scan and provisional planning. Human
+identity corrections and per-title assignments are authoritative for this job
+only and never change reusable masterlists. Attach a report made by the host-side
 `scripts/dry_run_info_scan.py` helper. That helper verifies ARM's global pause,
 empty job state, and persistent MakeMKV `+sel:all` stream policy, closes the
 selected tray by a kernel ioctl, waits a bounded
@@ -107,9 +109,11 @@ The private report is stamped with the fresh camera event UUID; the helper
 monitors drive media-change state, ARM pause/job state and ARM worker processes,
 and aborts on replacement or concurrent ARM processing.
 
-The GUI reconciles the actual MakeMKV title IDs, DVD titles/angles where
-reported, durations, chapters, sizes, per-title streams, approved mapping and
-the ordinary ARM plan/filename logic. Every filename and full local destination
+The GUI reconciles actual MakeMKV title IDs, DVD titles/angles where reported,
+durations, chapters, sizes, per-title streams and the ordinary ARM planning
+rules. A compatible confirmed mapping is applied only after scan compatibility
+checks; otherwise every title remains visible with collision-free provisional
+source-ID filenames and editable job-specific assignments. Every filename and full local destination
 is marked **would be created**; the read-only queue media mount is not written.
 Only after reviewing the capture, recognition, correction, scan, blockers and
 proposed files can the operator save **Test successful** or **Needs changes**.
@@ -140,7 +144,7 @@ If an insertion cannot be paired, the job remains held. Present again, then use 
 
 ### Agreement-only rip authorization and rejected discs
 
-For unattended ripping, set `RECOGNITION_BACKEND=ollama-agreement` and configure `VISION_BASE_URL` for a local Ollama service. Batch activation verifies the exact `qwen3-vl:30b-a3b-instruct-q4_K_M` and `qwen2.5vl:7b-q8_0` tags and their digests. Both models transcribe the retained camera images; only a unique match to an approved user masterlist with complete, agreeing Series, Season, episode/range, and applicable title fields can become rip-eligible. Every other automatic capture—including missing fields, disagreements, malformed output, and runtime failure—is recorded as rejected and cannot be reserved.
+For agreement recognition, set `RECOGNITION_BACKEND=ollama-agreement` and configure `VISION_BASE_URL` for a local Ollama service. Batch activation verifies the exact `qwen3-vl:30b-a3b-instruct-q4_K_M` and `qwen2.5vl:7b-q8_0` tags and their digests. Both models transcribe retained camera images; agreement establishes observations, not technical mapping or rip readiness. A unique compatible approved mapping may provide instructions. No-match and ambiguous-reference outcomes remain reviewable; actual model disagreement, operational failure, or missing evidence remains distinct. Dispatch still requires the normal confirmed-mapping and readiness gates.
 
 When a rejected capture is paired with a newly inserted ARM job, the job remains held under ARM's global pause for supervised review; the companion does not automatically cancel or eject it. Review can either explicitly confirm corrected identification against that same still-verifiable insertion, or leave it blocked. Verify the deployed ARM source/API and physical insertion association before production use. Rejected items and raw model requests/responses are retained in SQLite/evidence and are available in **Rejected Rips / Manual Review**. A saved human correction is marked `human_verified`, preserved separately from both model outputs, and by itself neither starts a rip nor changes the approved masterlist. Editing or resolving a correction after authorization revokes that authorization unless an execution reservation already exists; reserved jobs cannot have their correction altered through this review path. Resolving an item keeps its audit history; no later disc is automatically matched to it.
 

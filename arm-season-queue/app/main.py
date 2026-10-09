@@ -139,7 +139,7 @@ def create_app(settings=None, start_workers=True):
     @app.post('/api/batch')
     async def batch(request:Request):
         body = json.loads(await limited(request))
-        return {'batch':await asyncio.to_thread(controller.activate,body['master'])}
+        return {'batch':await asyncio.to_thread(controller.activate,body.get('master'))}
 
     @app.post('/api/dry-run')
     async def dry_run(request:Request):

@@ -83,7 +83,7 @@ class DryRunTests(unittest.TestCase):
 
     def test_proposal_uses_normal_arm_planner_and_creates_no_media(self):
         m=master(); d=m.discs[0]
-        proposal=build_plan(m,d,parse_info(INFO),'/local-ssd/completed')
+        proposal=build_plan(m,d,parse_info(INFO),'/local-ssd/completed',matched=True)
         self.assertEqual(proposal['mode'],'DRY RUN ONLY')
         self.assertFalse(proposal['ready_for_ripping'])
         self.assertEqual(proposal['blockers'],[])
@@ -98,23 +98,53 @@ class DryRunTests(unittest.TestCase):
     def test_proposal_rebuild_survives_json_persisted_scan_title_keys(self):
         m=master();d=m.discs[0];info=parse_info(INFO)
         restored=json.loads(json.dumps(info))
-        proposal=build_plan(m,d,restored,'/local-ssd/completed')
+        proposal=build_plan(m,d,restored,'/local-ssd/completed',matched=True)
         self.assertEqual(len(proposal['outputs']),len(d.title_map))
+
+    def test_unmatched_disc_still_gets_collision_free_source_id_proposals(self):
+        info=parse_info(INFO)
+        proposal=build_plan(None,None,info,'/local-ssd/completed',identity={
+            'media_type':'tv','series':'Unrecognized Series','season':4,'source':'camera observations'})
+        self.assertFalse(proposal['ready_for_ripping'])
+        self.assertEqual([x['makemkv_id'] for x in proposal['outputs']],[0,1])
+        self.assertTrue(all(x['provisional'] for x in proposal['outputs']))
+        self.assertEqual(len({x['destination'] for x in proposal['outputs']}),2)
+        self.assertIn('Source Title 000',proposal['outputs'][0]['destination'])
+
+    def test_job_specific_human_assignments_apply_without_editing_reference_lists(self):
+        info=parse_info(INFO)
+        proposal=build_plan(None,None,info,'/local-ssd/completed',identity={
+            'media_type':'tv','series':'Job Only','season':2,'source':'human correction'},
+            assignments={'0':{'episode_number':1,'episode_title':'Pilot'},
+                         '1':{'episode_number':2,'episode_title':'Arrival'}})
+        self.assertEqual(proposal['mapping_source'],'job-specific human assignments')
+        self.assertTrue(all(not x['provisional'] for x in proposal['outputs']))
+        self.assertTrue(all('Source Title' in x['destination'] for x in proposal['outputs']))
+        self.assertEqual(proposal['outputs'][1]['episode']['number'],2)
+
+    def test_descriptive_draft_never_supplies_technical_mapping(self):
+        m=master().model_copy(update={'approved':False})
+        proposal=build_plan(m,m.discs[0],parse_info(INFO),matched=True,
+                            identity={'media_type':'tv','series':m.series,'season':m.season})
+        self.assertEqual(proposal['mapping_source'],'unresolved; source IDs only')
+        self.assertTrue(all(x['provisional'] for x in proposal['outputs']))
+        self.assertIn('descriptive only',proposal['blockers'][0])
 
     def test_conflicting_dvd_title_or_stream_inventory_blocks_preview(self):
         changed=INFO.replace('TINFO:0,24,0,"01"','TINFO:0,24,0,"03"')
-        proposal=build_plan(master(),master().discs[0],parse_info(changed))
+        proposal=build_plan(master(),master().discs[0],parse_info(changed),matched=True)
         self.assertEqual(proposal['plan_status'],'blocked')
         self.assertTrue(any('DVD title' in text for text in proposal['blockers']))
         changed=INFO.replace('SINFO:0,1,3,0,"eng"','SINFO:0,1,3,0,"fra"')
-        proposal=build_plan(master(),master().discs[0],parse_info(changed))
+        proposal=build_plan(master(),master().discs[0],parse_info(changed),matched=True)
         self.assertTrue(any('audio language inventory differs' in text for text in proposal['blockers']))
 
     def test_extra_scanned_title_is_shown_excluded_and_blocks_ready_plan(self):
         extra=INFO.replace('TCOUNT:2','TCOUNT:3')+'TINFO:2,9,0,"0:01:00"\n'
-        proposal=build_plan(master(),master().discs[0],parse_info(extra))
-        self.assertEqual(proposal['excluded_titles'][0]['makemkv_id'],2)
-        self.assertIn('No approved output mapping',proposal['excluded_titles'][0]['reason'])
+        proposal=build_plan(master(),master().discs[0],parse_info(extra),matched=True)
+        self.assertEqual([x['makemkv_id'] for x in proposal['outputs']],[0,1,2])
+        self.assertEqual(proposal['excluded_titles'],[])
+        self.assertTrue(any('expects 2' in blocker.lower() for blocker in proposal['blockers']))
         self.assertFalse(proposal['ready_for_ripping'])
 
     def test_incomplete_scan_and_non_dryrun_paths_fail_closed(self):
@@ -229,16 +259,18 @@ class DryRunTests(unittest.TestCase):
         self.assertFalse(dry_scan.data_medium_ready(2,101))
         self.assertFalse(dry_scan.data_medium_ready(4,1))
 
-    def test_scan_allows_only_zero_jobs_or_one_current_manual_paused_job(self):
+    def test_scan_allows_zero_jobs_or_safe_current_job_and_rejects_unsafe_states(self):
         drive=[{'mount':'/dev/sr0','job_id_current':None}]
         self.assertIsNone(dry_scan.held_current_job(drive,[],'/dev/sr0'))
         drive[0]['job_id_current']=7
         held={'job_id':7,'status':'manual_paused','manual_start':False}
         self.assertEqual(dry_scan.held_current_job(drive,[held],'/dev/sr0'),held)
+        terminal={'job_id':7,'status':'fail','manual_start':False}
+        self.assertEqual(dry_scan.held_current_job(drive,[terminal],'/dev/sr0'),terminal)
         for jobs in ([{'job_id':7,'status':'ready','manual_start':False}],
                      [{'job_id':7,'status':'manual_paused','manual_start':True}],
                      [held,{'job_id':8,'status':'manual_paused','manual_start':False}], []):
-            with self.assertRaisesRegex(RuntimeError,'manual_paused'):
+            with self.assertRaises(RuntimeError):
                 dry_scan.held_current_job(drive,jobs,'/dev/sr0')
 
     def test_workflow_assessment_does_not_clear_plan_blockers_or_rip_readiness(self):

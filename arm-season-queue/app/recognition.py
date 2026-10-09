@@ -103,7 +103,7 @@ def match(result, masters):
         return []
     matches = []
     for master in masters:
-        if not master.approved or master.season != result['season']:
+        if master.season != result['season']:
             continue
         for disc in master.discs:
             if disc.number != result['disc']:
@@ -116,7 +116,9 @@ def match(result, masters):
                 visible = lambda x: (' '+normalize(x)+' ') in text
                 if not any(visible(x) for x in [master.series]+master.title_aliases):
                     continue
-                if not all(visible(x) or x in f['barcodes'] for x in master.edition_tokens):
+                observed_edition=' '.join(f.get('edition_candidates',[]))
+                if (observed_edition and master.edition_tokens
+                        and not any(visible(x) or x in f['barcodes'] for x in master.edition_tokens)):
                     continue
                 if disc.printed_identifiers and not any(visible(x) or x in f['barcodes'] for x in disc.printed_identifiers):
                     continue
@@ -131,7 +133,6 @@ def match(result, masters):
             if len(good) >= 2:
                 matches.append({'master': master.id, 'disc': disc.id, 'series': master.series,
                                 'season':master.season,'disc_number':disc.number,'edition':master.edition_name,
-                                'masterlist_sha256':digest(master),
+                                'approved':master.approved,'masterlist_sha256':digest(master),
                                 'confidence': min(f['confidence'] for f in good)})
     return matches
-

@@ -1,5 +1,22 @@
 # Verification and qualification
 
+## Optional-masterlist workflow refactor (local source validation, 2026-10-09)
+
+Recognition agreement is now independent of masterlist matching. The dry-run UI
+starts without a selected list, reports no-match/ambiguous references distinctly,
+and continues through information-only scan to provisional source-title-ID
+proposals. Confirmed compatible technical mappings can enrich a plan; descriptive
+drafts cannot provide instructions. Current-job human assignments remain separate
+from reusable masterlists. Prior disc dry runs remain available in review history.
+
+The active suite passes **162 tests** in a network-isolated container using the
+previous application image as its Python environment with current source mounted
+read-only. This covers optional and ambiguous matches, unmatched-source proposals,
+job-specific mappings, draft trust separation, dry-run execution isolation and
+scanner job-state checks. This is source/test validation only: the updated image
+has not been deployed, and no camera capture, tray closure, disc scan, ARM rip,
+FileFlows dispatch, or operator assessment was performed for this refactor.
+
 ## Local dry-run-only preparation (2026-10-08)
 
 The companion now has a separate dry-run review record, MakeMKV info-output
