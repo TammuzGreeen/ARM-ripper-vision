@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 
 from .arm import ARM, job_identity, plan, structure
-from .agreement import (MODEL_ORDER, evaluate as evaluate_agreement,
+from .agreement import (MODEL_ORDER, POLICY as FIELD_EVIDENCE_POLICY, evaluate as evaluate_agreement,
                         normalize as normalize_printed, preflight as agreement_preflight)
 from .formats import Masterlist, digest, rip_readiness
 from .dry_run import build_plan as build_dry_run_plan, parse_info
@@ -388,12 +388,22 @@ class Controller:
             identity.update(media_type='tv',series=master.series,season=master.season,
                             disc_number=disc.number,source='camera/reference match')
         elif not correction:
-            parsed=((recognition.get('result') or {}).get('agreement') or {}).get('normalized_priority_fields') or {}
-            primary=parsed.get(MODEL_ORDER[0],{})
-            identity.update(series=(primary.get('series') or [None])[0],
-                            season=(primary.get('seasons') or [None])[0],
-                            disc_number=(primary.get('disc_numbers') or [None])[0],
-                            episodes=primary.get('episodes'))
+            agreement=(recognition.get('result') or {}).get('agreement') or {}
+            combined=agreement.get('working_identification') or {}
+            if combined:
+                identity.update(media_type=combined.get('media_type'),
+                                series=combined.get('series_display') or combined.get('series'),
+                                season=combined.get('season'),disc_number=combined.get('disc_number'),
+                                episodes=combined.get('episodes'),
+                                field_evidence=agreement.get('field_combinations'),
+                                source='field-by-field camera combination')
+            else:
+                parsed=agreement.get('normalized_priority_fields') or {}
+                primary=parsed.get(MODEL_ORDER[0],{})
+                identity.update(series=(primary.get('series') or [None])[0],
+                                season=(primary.get('seasons') or [None])[0],
+                                disc_number=(primary.get('disc_numbers') or [None])[0],
+                                episodes=primary.get('episodes'))
         trusted_match=bool(master and disc and not correction.get('assignments')
                            and (len(matches)==1 or correction.get('source')=='human' or scan_resolved))
         output = build_dry_run_plan(master,disc,run['scan']['info'],self.s.dry_run_output_root,
@@ -415,11 +425,11 @@ class Controller:
         run['status'] = 'review'
 
     def reevaluate_dry_run_recognition(self, run_id):
-        """Re-run deterministic agreement/matching over retained model text only."""
+        """Re-combine deterministic field evidence from retained model text only."""
         with self.lock:
             run = self._dry_run(run_id)
-            if not run.get('scan') or run.get('assessment'):
-                raise ValueError('Re-evaluation requires an unassessed dry run with its scan attached')
+            if run.get('assessment'):
+                raise ValueError('Re-evaluation is unavailable after operator assessment')
             recognition = run.get('recognition') or {}
             event = run.get('event')
             if recognition.get('event') != event or not recognition.get('result'):
@@ -457,18 +467,23 @@ class Controller:
             result['accepted'] = result['agreement']['accepted']
             result['matches'] = result['agreement'].get('matches') or []
             result['policy'] = result['agreement']['policy']
-            result['reason'] = '; '.join(result['agreement']['reasons']) or 'Both models agree on identifying fields'
+            result['reason'] = ('; '.join(result['agreement']['reasons'])
+                                or 'Field evidence combined with per-value source attribution')
             # Build and validate the full preview before changing the stored
             # recognition result, so a planner failure cannot partially apply
             # the reevaluation.
             proposed = dict(run)
-            proposed['recognition'] = {'matches': result['agreement'].get('matches') or []}
-            self._rebuild_dry_run_plan(proposed)
+            proposed['recognition'] = {'event':event,'matches':result['agreement'].get('matches') or [],
+                                       'result':result,'status':'matched' if result['agreement'].get('matches') else 'unmatched'}
+            if run.get('scan'):
+                self._rebuild_dry_run_plan(proposed)
             self.recognition_done(event, result)
             refreshed = self._dry_run(run_id)
             proposed_matches = proposed['recognition']['matches']
             stored_matches = (refreshed.get('recognition') or {}).get('matches') or []
-            if proposed_matches != stored_matches:
+            if not refreshed.get('scan'):
+                refreshed.pop('plan',None)
+            elif proposed_matches != stored_matches:
                 self._rebuild_dry_run_plan(refreshed)
             else:
                 refreshed['plan'] = proposed['plan']
@@ -488,10 +503,13 @@ class Controller:
             return run
 
     def agreement_authorized(self, result):
-        if not isinstance(result, dict) or result.get('policy') != 'two-model-priority-field-agreement-v1':
+        if not isinstance(result, dict) or result.get('policy') not in (
+                FIELD_EVIDENCE_POLICY,'two-model-priority-field-agreement-v1'):
             return False
         agreement = result.get('agreement') or {}
         runs = result.get('runs') or {}
+        fields_clear=(agreement.get('policy')!='field-evidence-combination-v1'
+                      or not agreement.get('requires_targeted_review'))
         return (self.s.recognition_backend == 'ollama-agreement'
                 and tuple(result.get('model_tags') or ()) == MODEL_ORDER
                 and set(runs) == set(MODEL_ORDER)
@@ -499,7 +517,7 @@ class Controller:
                 and agreement.get('status') == 'PASS' and agreement.get('accepted') is True
                 and result.get('accepted') is True
                 and not agreement.get('reasons') and not agreement.get('field_disagreements')
-                and not agreement.get('operational_failures'))
+                and not agreement.get('operational_failures') and fields_clear)
 
     @staticmethod
     def human_retry_authorized(recognition):
@@ -565,17 +583,20 @@ class Controller:
         results = self.masters()
         agreement = result.get('agreement') or {}
         runs = result.get('runs') or {}
-        exact_pair = (result.get('policy') == 'two-model-priority-field-agreement-v1'
+        exact_pair = (result.get('policy') in (FIELD_EVIDENCE_POLICY,'two-model-priority-field-agreement-v1')
                       and tuple(result.get('model_tags') or ()) == MODEL_ORDER
                       and set(runs) == set(MODEL_ORDER)
                       and all(runs.get(tag, {}).get('usable') for tag in MODEL_ORDER))
-        model_agreement = (
+        field_evidence_valid = (
             self.s.recognition_backend == 'ollama-agreement'
             and exact_pair and agreement.get('status') == 'PASS'
-            and agreement.get('accepted') is True and not agreement.get('reasons')
-            and not agreement.get('field_disagreements') and not agreement.get('operational_failures')
+            and agreement.get('accepted') is True
+            and not agreement.get('requires_targeted_review')
+            and not agreement.get('operational_failures')
+            and not (agreement.get('policy')=='two-model-priority-field-agreement-v1'
+                     and (agreement.get('reasons') or agreement.get('field_disagreements')))
         )
-        matches = result.get('matches', []) if model_agreement else []
+        matches = result.get('matches', []) if field_evidence_valid else []
         if matches:
             valid_matches = []
             for item in matches:
@@ -601,13 +622,13 @@ class Controller:
             self.db.put('active_dry_run',run)
             return
         matched_reference = next((m for m in results if matches and m.id==matches[0].get('master')),None)
-        pass_result = bool(model_agreement and len(matches)==1 and matched_reference and matched_reference.approved)
+        pass_result = bool(field_evidence_valid and len(matches)==1 and matched_reference and matched_reference.approved)
         automatic_source = result.get('camera') is not None or result.get('backend') == 'ollama-agreement'
         status = 'ready' if pass_result else 'review'
-        if not model_agreement and automatic_source:
+        if not result.get('accepted',False) and automatic_source:
             result['accepted'] = False
             if not result.get('reason'):
-                result['reason'] = 'Recognition observations need review; scanning and per-title planning may continue'
+                result['reason'] = 'Recognition evidence is incomplete; scanning and per-title planning may continue'
         create_rejection = False
         with self.db.connect() as db:
             old = db.execute('SELECT body,status,created FROM events WHERE id=?',(event,)).fetchone()

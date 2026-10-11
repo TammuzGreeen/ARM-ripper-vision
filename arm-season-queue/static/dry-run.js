@@ -43,9 +43,11 @@
          output(details,'Original transcription (retained unchanged)',model.transcription||'');
          output(details,'Normalized identifying fields',normalized[tag]||{});panel.append(details);
        }
-       output(panel,'Matching decision',{
-         status:agreement.status,reasons:agreement.reasons||[],disagreements:agreement.field_disagreements||[],
-         selected:run.recognition.matches||[],candidate_proofs:agreement.validated_candidates||[],
+        output(panel,'Matching decision',{
+          status:agreement.status,reasons:agreement.reasons||[],disagreements:agreement.field_disagreements||[],
+          working_identification:agreement.working_identification||null,
+          field_by_field:agreement.field_combinations||null,
+          selected:run.recognition.matches||[],candidate_proofs:agreement.validated_candidates||[],
          missing:agreement.missing_fields||[],conflicts:agreement.wrong_fields||[]
        });
       if(reference.candidates?.length)output(panel,'Reference candidates (source and trust remain visible)',reference.candidates.map(c=>{const m=masters.find(x=>x.id===c.master);return {master:c.master,disc:c.disc,approved:c.approved,mapping_confirmed:c.mapping_confirmed,series:m?.series,season:m?.season,provenance:m?.provenance}}));
@@ -81,9 +83,9 @@
     }
      if(run.plan){
        const p=run.plan;panel.append(node('h3','Final proposed files · WOULD BE CREATED · NOT RIP-READY',p.blockers.length?'error':'badge'));
-       if(run.scan&&run.recognition&&!(run.recognition.matches||[]).length&&!run.assessment){
-         panel.append(action('Re-evaluate retained responses (no new inference)',()=>request(`/api/dry-run/${run.id}/reevaluate-recognition`,{})));
-       }
+        const currentPolicy=run.recognition?.result?.agreement?.policy;
+        if(run.recognition&&!run.assessment&&currentPolicy!=='field-evidence-combination-v1')
+          panel.append(action('Re-evaluate retained model outputs (no new inference)',()=>request(`/api/dry-run/${run.id}/reevaluate-recognition`,{})));
        panel.append(node('p',`Identity: ${p.identity?.series||'unresolved'} · ${p.identity?.media_type||'media type unknown'} · source: ${p.identity_source} · mapping: ${p.mapping_source} · ${p.plan_status} · ready_for_ripping=false`));
        if(p.reference_metadata)output(panel,'Reference metadata and technical trust',{
          trust:p.reference_metadata.trust,

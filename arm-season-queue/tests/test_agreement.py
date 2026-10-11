@@ -11,7 +11,7 @@ class AgreementGateTests(unittest.TestCase):
         self.assertEqual(OPTIONS['num_gpu'], 0)
 
     def test_transcription_prompt_focuses_disc_identity_and_avoids_repeated_fine_print(self):
-        for phrase in ('Series/title:', 'Season:', 'Disc:', 'Printed episodes/range:', 'episode titles',
+        for phrase in ('Series/title:', 'Season:', 'Disc:', 'Printed episodes/range:', 'Episode titles:',
                        'Ignore ratings', 'repeated legal text', 'at most 12 short lines'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, PROMPT)
@@ -86,8 +86,14 @@ class AgreementGateTests(unittest.TestCase):
 
     def test_different_explicit_episode_ranges_remain_a_real_disagreement(self):
         result = self.result(self.transcript(episodes='1-4'), self.transcript(episodes='5-8'))
-        self.assertFalse(result['accepted'])
+        self.assertTrue(result['accepted'])
+        self.assertTrue(result['requires_targeted_review'])
         self.assertIn('episodes', [item['field'] for item in result['field_disagreements']])
+
+    def test_overlapping_but_non_equivalent_episode_ranges_still_conflict(self):
+        result = self.result(self.transcript(episodes='1-4'), self.transcript(episodes='1-3'))
+        self.assertEqual(result['field_combinations']['episodes']['classification'], 'conflicting')
+        self.assertTrue(result['requires_targeted_review'])
 
     def test_localized_season_and_disc_labels_are_parsed(self):
         variants = (
@@ -107,9 +113,10 @@ class AgreementGateTests(unittest.TestCase):
                 self.assertEqual(result['reference_match']['status'],'none')
                 self.assertEqual(result['matches'], [])
 
-    def test_model_disagreement_rejects_even_with_a_correct_side(self):
+    def test_disc_number_conflict_is_targeted_review_without_discarding_other_fields(self):
         result = self.result(self.transcript(), self.transcript(disc=2))
-        self.assertFalse(result['accepted'])
+        self.assertTrue(result['accepted'])
+        self.assertTrue(result['requires_targeted_review'])
         self.assertTrue(result['field_disagreements'])
 
     def test_ambiguous_reference_candidates_do_not_reject_model_agreement(self):
@@ -125,6 +132,56 @@ class AgreementGateTests(unittest.TestCase):
         self.assertTrue(result['accepted'])
         self.assertEqual(result['reference_match']['status'],'none')
         self.assertEqual(result['matches'], [])
+
+    def test_ds9_capture_combines_franchise_partial_and_omitted_season(self):
+        primary = ('Media type: DVD\nSeries/title: STAR TREK DEEP SPACE NINE\n'
+                   'Season: 2\nDisc: 1\nPrinted episodes/range: 1-4\n'
+                   'Catalogue identifier: VFB 25451')
+        secondary = ('Media type: DVD\nSeries/title: STAR TREK\n'
+                     'Season: DEEP SPACE NINE\nDisc: 1\n'
+                     'Printed episodes/range: 1-4\nEpisode titles: DISC 1 : EPISODES 1-4\n'
+                     'Artist: CBS DVD\nAlbum: DOLBY\nAuthor: CBS STUDIOS INC.\n'
+                     'Edition/version: R1\nCatalogue identifier: EU 113126')
+        result = evaluate({MODEL_ORDER[0]: primary, MODEL_ORDER[1]: secondary},
+                          {tag: {'usable': True} for tag in MODEL_ORDER}, [master()])
+        agreement = result
+        self.assertTrue(agreement['accepted'], agreement['reasons'])
+        self.assertEqual(agreement['working_identification']['series_display'], 'Star Trek: Deep Space Nine')
+        self.assertEqual(agreement['working_identification']['season'], 2)
+        self.assertEqual(agreement['working_identification']['disc_number'], 1)
+        self.assertEqual(agreement['working_identification']['episodes'], [1, 2, 3, 4])
+        self.assertEqual(agreement['field_combinations']['series']['classification'], 'compatible_partial')
+        self.assertEqual(agreement['field_combinations']['season']['classification'], 'single-source')
+        self.assertEqual(agreement['field_combinations']['episodes']['classification'], 'corroborated')
+        self.assertEqual(agreement['reference_match']['status'], 'unique')
+        parsed_secondary = agreement['normalized_priority_fields'][MODEL_ORDER[1]]
+        self.assertEqual(parsed_secondary['series'], ['star trek'])
+        self.assertEqual(parsed_secondary['seasons'], [])
+        self.assertEqual(parsed_secondary['descriptive']['artist'], ['CBS DVD'])
+        self.assertNotIn('cbs dvd', parsed_secondary['series'])
+        self.assertEqual(parsed_secondary['episode_titles'], [])
+
+    def test_genuine_series_and_season_conflicts_are_field_scoped(self):
+        left = 'Series/title: Star Trek: Deep Space Nine\nSeason: 2\nDisc: 1\nEpisodes: 1-4'
+        right = 'Series/title: Star Trek Voyager\nSeason: 3\nDisc: 1\nEpisodes: 1-4'
+        result = evaluate({MODEL_ORDER[0]: left, MODEL_ORDER[1]: right},
+                          {tag: {'usable': True} for tag in MODEL_ORDER}, [master()])
+        self.assertEqual(set(item['field'] for item in result['field_disagreements']),
+                         {'series', 'season'})
+        self.assertEqual(result['working_identification']['disc_number'], 1)
+        self.assertEqual(result['working_identification']['episodes'], [1, 2, 3, 4])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['status'], 'CONFLICT_REVIEW')
+
+    def test_no_masterlists_preserves_single_source_identity_without_match(self):
+        primary = 'Series/title: Star Trek: Deep Space Nine\nSeason: 2\nDisc: 1'
+        secondary = 'Series/title: Star Trek\nDisc: 1'
+        result = evaluate({MODEL_ORDER[0]: primary, MODEL_ORDER[1]: secondary},
+                          {tag: {'usable': True} for tag in MODEL_ORDER}, [])
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['reference_match']['status'], 'none')
+        self.assertEqual(result['working_identification']['season'], 2)
+        self.assertFalse(result['rip_authorization_eligible'])
 
     def test_ambiguous_explicit_edition_tokens_are_reference_uncertainty(self):
         original = master()

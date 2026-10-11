@@ -1,5 +1,69 @@
 # Verification and qualification
 
+## Field-level model evidence and retained DS9 dry run (2026-10-11)
+
+The old blanket agreement rule is replaced by per-field evidence combination.
+The retained transcriptions were re-evaluated without another model request:
+
+| Field | Qwen3-VL | Qwen2.5-VL | Combination |
+|---|---|---|---|
+| Series | Star Trek: Deep Space Nine | Star Trek | Compatible partial: use the more specific Qwen3 reading; the franchise reading does not independently confirm DS9 |
+| Season | 2 | No usable numeric season (`DEEP SPACE NINE` was under `Season:`) | Single-source: 2, attributed to Qwen3 |
+| Disc | 1 | 1 | Corroborated: 1 |
+| Printed episode range | 1–4 | 1–4 | Corroborated: episodes 1–4 |
+| Packaging/descriptive text | `VFB 25451` | `CBS DVD`, `DOLBY`, `CBS STUDIOS INC.`, `R1`, `EU 113126` | Retained as attributed descriptive/identifier evidence, not series candidates |
+
+The working identification is **Star Trek: Deep Space Nine — Season 2 —
+Disc 1 — Episodes 1–4**. `field-evidence-combination-v1` reports PASS for
+identification, but the active private masterlist has no compatible DS9 entry;
+matching is `none`. This does not authorize a rip.
+
+The queue was deployed as `arm-season-queue:field-evidence-20261011-r3` after
+backing up its SQLite state and private evidence. A fresh host-side, networkless
+MakeMKV `info`-only scan then completed while ARM's global rip pause remained on
+(`ripping_enabled=false`),
+its `/dev/sr0` current-job field was empty, and no active ARM jobs were listed.
+The helper also serializes helper invocations, rejects a host-visible competing
+MakeMKV scanner, and rechecks ARM during its bounded scan. The private report is
+under `/srv/arm-vision/local-test/voyager-s2-d1/state/dry-run-scans/`.
+
+The scan found DVD label `EU_103539`, four titles (MakeMKV IDs 0–3, DVD titles
+1–4), each with MPEG-2 720x576 video, five audio streams (German, English,
+Spanish, French, Italian), and ten subtitle streams. This validates a four-title
+physical inventory, not episode identity or title-to-episode order. With no
+compatible approved mapping or human assignments, the plan proposes:
+
+- `.../Season 02/Source Title 000 - PROVISIONAL.mkv`
+- `.../Season 02/Source Title 001 - PROVISIONAL.mkv`
+- `.../Season 02/Source Title 002 - PROVISIONAL.mkv`
+- `.../Season 02/Source Title 003 - PROVISIONAL.mkv`
+
+All paths are proposals under
+`/srv/arm-vision/local-test/voyager-s2-d1/completed/tv/Star Trek_ Deep Space
+Nine/`; no file was created. The plan remains blocked on absent technical
+mapping and four unassigned episode identities, with `ready_for_ripping: false`.
+No ARM scan/start/cancel/eject endpoint, rip, transcode, FileFlows dispatch, or
+agent assessment was performed. The queue UI's final review and operator
+assessment remain theirs to complete.
+
+ARM's prescan owner was its job-2 worker in `arm/ripper/main.py`, invoking
+`makemkvcon --robot --messages=-stdout info --cache=1 dev:/dev/sr0
+--minlength=0`. The live ARM configuration has `PRESCAN_TIMEOUT=300` and
+`PRESCAN_RETRIES=3`; the drive-specific overrides are null, so those global
+values apply. Failed attempts sleep 30 then 60 seconds, and after the
+last failure ARM logs that it will retry during the rip phase. The retained log
+shows attempt 1 timing out after 300 seconds and attempt 2 starting. At the later
+safe handoff there was no current drive job, no active ARM job, and no visible
+ARM/MakeMKV worker. Thus the observed retry was ARM's bounded retry loop, not the
+host helper; no worker cancellation was needed or issued. The scanner timeout
+root cause (disc/device/MakeMKV hang) is not established by those logs alone.
+
+The active application suite ran in the newly built image with **166 tests
+passing**, including field omissions, franchise/subseries compatibility,
+equivalent ranges, genuine conflicts, packaging text, absent references, dry-run
+planning and scanner safeguards. This is software test evidence, not a claim of
+ARM ripping or FileFlows qualification.
+
 ## Optional-masterlist workflow refactor (local source validation, 2026-10-09)
 
 Recognition agreement is now independent of masterlist matching. The dry-run UI

@@ -28,6 +28,7 @@ MEDIA_CHANGED = 0x5325      # CDROM_MEDIA_CHANGED
 CLOSE_TRAY = 0x5319         # CDROMCLOSETRAY
 DATA_MEDIA_STATUSES = {4, 101, 102, 103, 104, 105}
 TERMINAL_ARM_STATUSES = {'success', 'fail', 'cancelled'}
+SCAN_LOCK = Path('/run/lock/arm-season-queue-optical-scan.lock')
 
 
 def api_json(base, path):
@@ -74,6 +75,39 @@ def check_arm(base, device):
     if selected[0].get('drive_mode') != 'auto':
         raise RuntimeError('ARM drive is not in the inspected automatic mode')
     return {'drive':selected[0], 'held_job':held}
+
+
+def makemkv_processes():
+    """Find host-visible MakeMKV scanner processes, including container PIDs."""
+    found=[]
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            args=(entry/'cmdline').read_bytes().replace(b'\0',b' ').decode(errors='replace')
+        except (OSError, PermissionError):
+            continue
+        if 'makemkvcon' in args and 'info' in args:
+            found.append((int(entry.name),args.strip()))
+    return found
+
+
+def acquire_scan_lock():
+    """Serialize this helper and refuse any scanner not owned by this process."""
+    SCAN_LOCK.parent.mkdir(parents=True,exist_ok=True)
+    lock=os.open(SCAN_LOCK,os.O_RDWR|os.O_CREAT,0o600)
+    try:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(lock)
+        raise RuntimeError('Another supervised optical scan helper holds the scan lock')
+    running=makemkv_processes()
+    own_pid=os.getpid()
+    if any(pid!=own_pid for pid,_ in running):
+        fcntl.flock(lock,fcntl.LOCK_UN)
+        os.close(lock)
+        raise RuntimeError('Another MakeMKV info scanner is running; drive ownership is unresolved')
+    return lock
 
 
 def drive_ioctl(device, operation):
@@ -201,7 +235,9 @@ def main():
     report_fd, name = tempfile.mkstemp(prefix='makemkv-info-dry-run-', suffix='.txt', dir=a.report_dir)
     os.close(report_fd)
     report = Path(name)
+    scan_lock=None
     try:
+        scan_lock=acquire_scan_lock()
         arm_state = check_arm(a.arm_api, a.device)
         require_all_stream_profile(a.makemkv_config)
         if drive_ioctl(a.device, DRIVE_STATUS) == 2:
@@ -211,6 +247,8 @@ def main():
         # The ARM source profile confirms its /drives/{id}/scan route launches
         # processing. Never call it; stop if its local worker started anyway.
         arm_state = check_arm(a.arm_api, a.device)
+        if makemkv_processes():
+            raise RuntimeError('A MakeMKV scanner appeared after ARM safety check; refusing competing scan')
         cmd = ['docker','run','--rm','--network','none','--read-only',
                '--tmpfs','/tmp:rw,nosuid,nodev,size=512m','--user','0:24','--cap-drop','ALL',
                '--env','HOME=/root','--device',f'{a.device}:/dev/sr0:rw',
@@ -240,6 +278,10 @@ def main():
         print(f'DRY RUN SCAN BLOCKED: {exc}', file=sys.stderr)
         print(f'Private diagnostic report (may be incomplete): {report}', file=sys.stderr)
         return 2
+    finally:
+        if scan_lock is not None:
+            fcntl.flock(scan_lock,fcntl.LOCK_UN)
+            os.close(scan_lock)
 
 
 if __name__ == '__main__':

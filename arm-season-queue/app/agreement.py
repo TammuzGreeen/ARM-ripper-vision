@@ -25,10 +25,31 @@ from .text_normalization import normalize_structural_labels
 PRIMARY_MODEL = "qwen3-vl:30b-a3b-instruct-q4_K_M"
 SECONDARY_MODEL = "qwen2.5vl:7b-q8_0"
 MODEL_ORDER = (PRIMARY_MODEL, SECONDARY_MODEL)
+POLICY = "field-evidence-combination-v1"
+# These are explicit, known franchise/subseries relationships, not a general
+# prefix or fuzzy matcher. Extend only with independently reviewed aliases.
+SERIES_CANONICAL = {
+    "star trek deep space nine": "Star Trek: Deep Space Nine",
+    "star trek ds9": "Star Trek: Deep Space Nine",
+    "deep space nine": "Star Trek: Deep Space Nine",
+    "ds9": "Star Trek: Deep Space Nine",
+    "star trek voyager": "Star Trek: Voyager",
+    "star trek discovery": "Star Trek: Discovery",
+    "star trek strange new worlds": "Star Trek: Strange New Worlds",
+    "star trek the original series": "Star Trek: The Original Series",
+    "star trek the next generation": "Star Trek: The Next Generation",
+    "star trek deep space nine franchise": "Star Trek: Deep Space Nine",
+    "star trek": "Star Trek",
+}
+SERIES_PARENT = {"star trek": {
+    "star trek deep space nine", "star trek voyager", "star trek discovery",
+    "star trek strange new worlds", "star trek the original series",
+    "star trek the next generation",
+}}
 PROMPT = (
     "Read the visible DVD or Blu-ray packaging and transcribe only legible information. "
     "Return separate plain-text lines for Media type:, Series/title:, Season:, Disc:, "
-    "Printed episodes/range:, Episode titles:, episode titles:, Artist:, Album:, Author:, Edition/version:, "
+    "Printed episodes/range:, Episode titles:, Artist:, Album:, Author:, Edition/version:, "
     "and Catalogue identifier: when those fields are visible. "
     "Do not omit a legible field; copy its original-language marker and exact names/numbers. "
     "Omit a field if it is not readable; never infer, "
@@ -47,6 +68,134 @@ def normalize(value: str) -> str:
     value = unicodedata.normalize("NFKD", value or "")
     value = "".join(char for char in value if not unicodedata.combining(char))
     return " ".join(re.sub(r"[^\w]+", " ", value.casefold()).split())
+
+
+def _canonical_series(value: str) -> str | None:
+    key = normalize(value)
+    display = SERIES_CANONICAL.get(key)
+    return normalize(display) if display else None
+
+
+def _series_relation(left: str, right: str) -> str:
+    """Return equivalent, compatible_partial, or conflicting (never fuzzy)."""
+    a, b = normalize(left), normalize(right)
+    ca, cb = _canonical_series(a), _canonical_series(b)
+    a, b = ca or a, cb or b
+    if a == b:
+        return "corroborated"
+    if a in SERIES_PARENT and b in SERIES_PARENT[a]:
+        return "compatible_partial"
+    if b in SERIES_PARENT and a in SERIES_PARENT[b]:
+        return "compatible_partial"
+    return "conflicting"
+
+
+def _display_series(value: str | None, parsed: dict | None = None) -> str | None:
+    if not value:
+        return None
+    for key, display in SERIES_CANONICAL.items():
+        if normalize(display) == normalize(value):
+            return display
+    raw = (parsed or {}).get("raw_fields", {}).get("series title") or []
+    return raw[0] if raw else value
+
+
+def _combine_list_field(name: str, primary: list, secondary: list) -> dict:
+    p, s = list(primary or []), list(secondary or [])
+    if not p and not s:
+        return {"classification":"unknown","value":None,"sources":[]}
+    if p and not s:
+        return {"classification":"single-source","value":p,"sources":[{"model":PRIMARY_MODEL,"value":p}]}
+    if s and not p:
+        return {"classification":"single-source","value":s,"sources":[{"model":SECONDARY_MODEL,"value":s}]}
+    if p == s:
+        return {"classification":"corroborated","value":p,
+                "sources":[{"model":PRIMARY_MODEL,"value":p},{"model":SECONDARY_MODEL,"value":s}]}
+    if name == "episode_titles" and set(p).issubset(s):
+        return {"classification":"compatible_partial","value":s,
+                "sources":[{"model":PRIMARY_MODEL,"value":p},{"model":SECONDARY_MODEL,"value":s}],
+                "uncertainty":"Primary supplied a compatible subset"}
+    if name == "episode_titles" and set(s).issubset(p):
+        return {"classification":"compatible_partial","value":p,
+                "sources":[{"model":PRIMARY_MODEL,"value":p},{"model":SECONDARY_MODEL,"value":s}],
+                "uncertainty":"Secondary supplied a compatible subset"}
+    return {"classification":"conflicting","value":None,
+            "sources":[{"model":PRIMARY_MODEL,"value":p},{"model":SECONDARY_MODEL,"value":s}]}
+
+
+def combine_observations(parsed: dict) -> dict:
+    """Combine per-field evidence while retaining each model's attribution."""
+    p, s = parsed[PRIMARY_MODEL], parsed[SECONDARY_MODEL]
+    fields = {}
+    pseries, sseries = p.get("series", []), s.get("series", [])
+    if not pseries and not sseries:
+        fields["series"] = {"classification":"unknown","value":None,"sources":[]}
+    elif pseries and not sseries:
+        fields["series"] = {"classification":"single-source","value":pseries[0],
+                             "display_value":_display_series(pseries[0],p),
+                             "sources":[{"model":PRIMARY_MODEL,"value":pseries[0]}]}
+    elif sseries and not pseries:
+        fields["series"] = {"classification":"single-source","value":sseries[0],
+                             "display_value":_display_series(sseries[0],s),
+                             "sources":[{"model":SECONDARY_MODEL,"value":sseries[0]}]}
+    elif len(pseries)==1 and len(sseries)==1:
+        relation=_series_relation(pseries[0],sseries[0])
+        if relation=="corroborated":
+            value=_canonical_series(pseries[0]) or normalize(pseries[0])
+            fields["series"]={"classification":"corroborated","value":value,
+                              "display_value":_display_series(value,p),
+                              "sources":[{"model":PRIMARY_MODEL,"value":pseries[0]},
+                                         {"model":SECONDARY_MODEL,"value":sseries[0]}]}
+        elif relation=="compatible_partial":
+            specific=pseries[0] if pseries[0] in SERIES_PARENT.get(sseries[0],set()) else sseries[0]
+            specific=_canonical_series(specific) or specific
+            fields["series"]={"classification":"compatible_partial","value":specific,
+                              "display_value":_display_series(specific,p if specific==pseries[0] else s),
+                              "sources":[{"model":PRIMARY_MODEL,"value":pseries[0]},
+                                         {"model":SECONDARY_MODEL,"value":sseries[0]}],
+                              "uncertainty":"Franchise-level reading is compatible but does not independently confirm the subseries"}
+        else:
+            fields["series"]={"classification":"conflicting","value":None,
+                              "sources":[{"model":PRIMARY_MODEL,"value":pseries[0]},
+                                         {"model":SECONDARY_MODEL,"value":sseries[0]}]}
+    else:
+        fields["series"]={"classification":"conflicting","value":None,
+                          "sources":[{"model":PRIMARY_MODEL,"value":pseries},
+                                     {"model":SECONDARY_MODEL,"value":sseries}]}
+
+    def scalar_field(name,left,right):
+        combined=_combine_list_field(name,left,right)
+        if combined.get("classification")!="conflicting":
+            value=combined.get("value")
+            combined["value"]=value[0] if value and len(value)==1 else None
+            if value and len(value)>1:
+                combined["classification"]="conflicting"
+                combined["uncertainty"]="A model supplied multiple incompatible values"
+        return combined
+    fields["season"]=scalar_field("season",p.get("seasons",[]),s.get("seasons",[]))
+    fields["disc_number"]=scalar_field("disc_number",p.get("disc_numbers",[]),s.get("disc_numbers",[]))
+    fields["episodes"]=_combine_list_field("episodes",p.get("episodes",[]),s.get("episodes",[]))
+    fields["episode_titles"]=_combine_list_field("episode_titles",p.get("episode_titles",[]),s.get("episode_titles",[]))
+    fields["disc_format"]=_combine_list_field("disc_format",p.get("media_formats",[]),s.get("media_formats",[]))
+
+    def scalar_lists(key):
+        left,right=p.get(key,[]),s.get(key,[])
+        return _combine_list_field(key,left,right)
+    fields["edition"] = scalar_lists("edition_observations")
+    # Catalogue identifiers are additive packaging evidence, not mutually
+    # exclusive identity claims (a disc can print multiple catalogue codes).
+    catalogue=[]
+    for tag,parsed_model in ((PRIMARY_MODEL,p),(SECONDARY_MODEL,s)):
+        catalogue.extend({"model":tag,"value":value} for value in parsed_model.get("catalogue_identifiers",[]))
+    fields["catalogue_identifiers"]={"classification":"single-source" if len({x['model'] for x in catalogue})==1
+                                     else "corroborated" if catalogue and len({x['value'] for x in catalogue})==1
+                                     else "compatible_partial" if catalogue else "unknown",
+                                     "value":list(dict.fromkeys(x["value"] for x in catalogue)),"sources":catalogue}
+    conflicts=[name for name,item in fields.items() if item.get("classification")=="conflicting"]
+    working={name:item.get("value") for name,item in fields.items()}
+    working["series_display"]=fields["series"].get("display_value")
+    working["media_type"]="tv" if working.get("season") and working.get("episodes") else None
+    return {"fields":fields,"working_identification":working,"conflicting_fields":conflicts}
 
 
 def _phrase(text: str, value: str) -> bool:
@@ -198,17 +347,37 @@ def _run_model(settings, tag: str, meta: dict, encoded: list[str], evidence_dir:
 
 
 def _parse_text(text: str, masters: list) -> dict:
-    # Keep raw text in the model run; these are only normalized observations.
+    # Only the explicitly labeled series field is a series observation.
+    # Artist/album/author and general packaging text remain descriptive fields.
     label_text = normalize_structural_labels(text)
     references = list(masters or [])
     series = set()
-    media_types=set()
+    media_formats = set()
+    descriptive = {}
+    raw_fields = {}
     for line in text.splitlines():
-        media=re.match(r"(?i)^\s*media\s+type\s*:\s*(.+?)\s*$",line)
-        if media: media_types.add(normalize(media[1]))
-        found = re.match(r"(?i)^\s*(?:series(?:\s*/\s*title)?|title|album|artist|author)\s*:\s*(.+?)\s*$", line)
-        if found:
-            series.add(normalize(found[1]))
+        found = re.match(r"(?i)^\s*([\w /-]+?)\s*:\s*(.*?)\s*$", line)
+        if not found:
+            continue
+        label, value = normalize(found[1]), found[2].strip()
+        if not value:
+            continue
+        raw_fields.setdefault(label, []).append(value)
+        if label in ("series", "series title", "series title"):
+            canonical = _canonical_series(value)
+            series.add(canonical or normalize(value))
+        elif label in ("artist", "album", "author"):
+            descriptive.setdefault(label, []).append(value)
+        elif label in ("media type", "format", "disc format"):
+            media_formats.add(normalize(value))
+    # Reference aliases may anchor a candidate when older transcriptions did
+    # not use field labels. They are exact token-boundary matches only.
+    if not series:
+        for master in references:
+            for value in (master.series, *master.title_aliases):
+                if _phrase(text, value):
+                    canonical = _canonical_series(value)
+                    series.add(canonical or normalize(value))
     known_editions = {}
     known_identifiers = {}
     for master in references:
@@ -246,7 +415,21 @@ def _parse_text(text: str, masters: list) -> dict:
                     titles.add(normalize(episode.title))
     disc_numbers = {int(value) for value in re.findall(
         r"(?i)\b(?:disc|disk)\s*(?:number\s*)?(?:no\.?\s*)?[:#]?\s*(\d{1,2})\b", label_text)}
-    return {"series": sorted(series), "media_types":sorted(media_types), "seasons": sorted(seasons),
+    episode_titles = []
+    for raw in raw_fields.get("episode titles", []):
+        # A field accidentally populated with structural labels/ranges is not
+        # accepted as episode-title evidence.
+        if not re.search(r"(?i)\b(?:disc|disk|episodes?|episoden|episodios)\b", raw):
+            episode_titles.append(raw)
+    edition = [value for value in raw_fields.get("edition version", [])]
+    catalogue = [value for label, values in raw_fields.items()
+                 if label in ("catalogue identifier", "catalog identifier", "catalogue id", "barcode")
+                 for value in values]
+    return {"series": sorted(series), "media_types": [], "media_formats":sorted(media_formats),
+            "descriptive": descriptive, "raw_fields": raw_fields,
+            "edition_observations": edition, "catalogue_identifiers": catalogue,
+            "episode_titles": sorted({normalize(value) for value in episode_titles}),
+            "seasons": sorted(seasons),
             "episodes": sorted(episode_numbers), "titles": sorted(titles),
             "disc_numbers": sorted(disc_numbers),
             "edition_master_ids": sorted(known_editions),
@@ -282,104 +465,76 @@ def _candidate_fields(parsed: dict, master, disc) -> dict:
 def evaluate(transcriptions: dict[str, str], run_results: dict[str, dict], masters: list) -> dict:
     parsed = {tag: _parse_text(transcriptions.get(tag, ""), masters) for tag in MODEL_ORDER}
     operational_failures = [tag for tag in MODEL_ORDER if not run_results.get(tag, {}).get("usable")]
-    disagreements = []
-    for field in ("series", "media_types", "seasons", "episodes", "titles", "disc_numbers",
-                  "edition_master_ids", "printed_identifier_disc_ids"):
-        # Absence is not a conflicting observation. Required identity fields
-        # are checked independently against each candidate below.
-        if (parsed[PRIMARY_MODEL][field] and parsed[SECONDARY_MODEL][field]
-                and parsed[PRIMARY_MODEL][field] != parsed[SECONDARY_MODEL][field]):
-            disagreements.append({"field": field, "primary": parsed[PRIMARY_MODEL][field],
-                                  "secondary": parsed[SECONDARY_MODEL][field]})
-
-    candidates = []
-    references = list(masters or [])
-    edition_observations = [parsed[tag]["edition_master_ids"] for tag in MODEL_ORDER]
-    identifier_observations = [parsed[tag]["printed_identifier_disc_ids"] for tag in MODEL_ORDER]
-    explicit_edition_conflict = False
-    explicit_identifier_conflict = False
-    if all(edition_observations) and edition_observations[0] != edition_observations[1]:
-        explicit_edition_conflict = True
-    if all(identifier_observations) and identifier_observations[0] != identifier_observations[1]:
-        explicit_identifier_conflict = True
+    combined=combine_observations(parsed)
+    fields=combined["fields"]
+    disagreements=[{"field":name,"classification":"conflicting",
+                    "primary":next((x["value"] for x in item.get("sources",[]) if x.get("model")==PRIMARY_MODEL),None),
+                    "secondary":next((x["value"] for x in item.get("sources",[]) if x.get("model")==SECONDARY_MODEL),None)}
+                   for name,item in fields.items() if item.get("classification")=="conflicting"]
+    references=list(masters or [])
+    working=combined["working_identification"]
+    hard_conflicts={"series","season","disc_number","episodes"}.intersection(combined["conflicting_fields"])
+    editions=set(parsed[PRIMARY_MODEL]["edition_master_ids"]+parsed[SECONDARY_MODEL]["edition_master_ids"])
+    identifiers=set(parsed[PRIMARY_MODEL]["printed_identifier_disc_ids"]+
+                    parsed[SECONDARY_MODEL]["printed_identifier_disc_ids"])
+    candidates=[]
     for master in references:
         for disc in master.discs:
-            if explicit_edition_conflict or explicit_identifier_conflict:
+            if hard_conflicts:
                 continue
-            explicit_disc_numbers = [parsed[tag]["disc_numbers"] for tag in MODEL_ORDER if parsed[tag]["disc_numbers"]]
-            if any(values != [disc.number] for values in explicit_disc_numbers):
+            series_value=working.get("series")
+            if series_value and _series_relation(series_value,master.series)!="corroborated":
                 continue
-            explicitly_identified_editions = set(parsed[PRIMARY_MODEL]["edition_master_ids"] + parsed[SECONDARY_MODEL]["edition_master_ids"])
-            if explicitly_identified_editions and master.id not in explicitly_identified_editions:
+            if working.get("season") is not None and working["season"]!=master.season:
                 continue
-            explicitly_identified_discs = set(parsed[PRIMARY_MODEL]["printed_identifier_disc_ids"] + parsed[SECONDARY_MODEL]["printed_identifier_disc_ids"])
-            if explicitly_identified_discs and f"{master.id}/{disc.id}" not in explicitly_identified_discs:
+            if working.get("disc_number") is not None and working["disc_number"]!=disc.number:
                 continue
-            field_sets = {tag: _candidate_fields(parsed[tag], master, disc) for tag in MODEL_ORDER}
-            compatible = True
-            for tag in MODEL_ORDER:
-                observed = parsed[tag]
-                if observed["series"] and not _series_compatible(observed["series"], master):
-                    compatible = False
-                if observed["seasons"] and observed["seasons"] != [master.season]:
-                    compatible = False
-                expected_episodes = sorted(_expected_episodes(disc))
-                if observed["episodes"] and expected_episodes and observed["episodes"] != expected_episodes:
-                    compatible = False
-                if observed["titles"]:
-                    expected_titles = {normalize(ep.title) for ep in disc.episodes if ep.title}
-                    if expected_titles and not set(observed["titles"]).issubset(expected_titles):
-                        compatible = False
-            has_anchor=(any(_series_compatible(parsed[tag]["series"],master) for tag in MODEL_ORDER)
-                        or any(f"{master.id}/{disc.id}" in parsed[tag]["printed_identifier_disc_ids"]
-                               for tag in MODEL_ORDER)
-                        or master.id in parsed[PRIMARY_MODEL]["edition_master_ids"]
-                        or master.id in parsed[SECONDARY_MODEL]["edition_master_ids"])
-            if compatible and has_anchor:
-                candidates.append((master, disc, field_sets))
-
-    missing = []
-    wrong = []
+            if editions and master.id not in editions:
+                continue
+            if identifiers and f"{master.id}/{disc.id}" not in identifiers:
+                continue
+            expected=sorted(_expected_episodes(disc))
+            observed=working.get("episodes") or []
+            if observed and expected and observed!=expected:
+                continue
+            anchor=bool(series_value or f"{master.id}/{disc.id}" in identifiers or master.id in editions)
+            if anchor:
+                candidates.append((master,disc,{tag:_candidate_fields(parsed[tag],master,disc) for tag in MODEL_ORDER}))
+    missing=[]
+    wrong=[]
     for master in references:
         for disc in master.discs:
             for tag in MODEL_ORDER:
-                fields = _candidate_fields(parsed[tag], master, disc)
-                for name, value in fields.items():
-                    if not value.get("required", True) or value["status"] == "CORRECT":
+                for name,value in _candidate_fields(parsed[tag],master,disc).items():
+                    if not value.get("required",True) or value["status"]=="CORRECT":
                         continue
-                    entry = {"model": tag, "field": name, "expected": value["value"],
-                             "observed": value["observed"], "status": value["status"],
-                             "candidate_master": master.id, "candidate_disc": disc.id}
-                    (missing if value["status"] == "OMITTED" else wrong).append(entry)
-    reasons = []
+                    entry={"model":tag,"field":name,"expected":value["value"],"observed":value["observed"],
+                           "status":value["status"],"candidate_master":master.id,"candidate_disc":disc.id}
+                    (missing if value["status"]=="OMITTED" else wrong).append(entry)
+    useful=bool(working.get("series") or working.get("season") is not None
+                or working.get("disc_number") is not None or working.get("episodes"))
+    reasons=[]
     if operational_failures:
         reasons.append("operational_recognition_failure")
     if disagreements:
-        reasons.append("model_disagreement_on_priority_fields")
-    if explicit_edition_conflict:
-        reasons.append("conflicting_or_ambiguous_edition_identifiers")
-    if explicit_identifier_conflict:
-        reasons.append("conflicting_or_ambiguous_printed_disc_identifiers")
-    if len(parsed[PRIMARY_MODEL]["series"]) > 1 or len(parsed[SECONDARY_MODEL]["series"]) > 1:
-        reasons.append("ambiguous_series")
-    if len(parsed[PRIMARY_MODEL]["seasons"]) > 1 or len(parsed[SECONDARY_MODEL]["seasons"]) > 1:
-        reasons.append("conflicting_or_ambiguous_season")
-    useful = all(any(parsed[tag][field] for field in ("series", "media_types", "seasons", "episodes", "disc_numbers"))
-                 for tag in MODEL_ORDER)
+        reasons.append("conflicting_identification_fields")
     if not useful:
-        reasons.append("incomplete_identity_observations")
-    passed = useful and not reasons and not operational_failures and not disagreements
+        reasons.append("no_usable_identification_fields")
+    accepted=useful and not operational_failures
+    passed=accepted and not disagreements
     match_rows = []
     normalized_candidates = []
     if len(candidates) == 1:
-        master, disc, fields = candidates[0]
+        master, disc, candidate_fields = candidates[0]
         confirmed=bool(master.approved and not rip_readiness(master,disc))
         match_rows = [{"master": master.id, "disc": disc.id, "series": master.series,
                        "season": master.season, "disc_number": disc.number, "edition": master.edition_name,
                        "approved": master.approved, "mapping_confirmed":confirmed,
-                       "masterlist_sha256": digest(master), "confidence": 1.0}]
+                       "masterlist_sha256": digest(master),
+                       "field_evidence":{name:item.get("classification") for name,item in fields.items()
+                                         if name in ("series","season","disc_number","episodes")}}]
         normalized_candidates = [{"master": master.id, "disc": disc.id,
-                                  "primary": fields[PRIMARY_MODEL], "secondary": fields[SECONDARY_MODEL]}]
+                                  "primary": candidate_fields[PRIMARY_MODEL], "secondary": candidate_fields[SECONDARY_MODEL]}]
     reference_match = {"status":"none", "candidate_count":0, "candidates":[]}
     if len(candidates) == 1:
         master, disc, _ = candidates[0]
@@ -392,27 +547,32 @@ def evaluate(transcriptions: dict[str, str], run_results: dict[str, dict], maste
                                           "mapping_confirmed":bool(m.approved and not rip_readiness(m,d))}
                                           for m,d,_ in candidates]}
     return {
-        "policy": "two-model-priority-field-agreement-v1",
-        "status": "PASS" if passed else "INCOMPLETE" if not operational_failures and not disagreements else "REJECTED_FOR_REVIEW",
-        "accepted": passed, "reasons": sorted(set(reasons)), "operational_failures": operational_failures,
+        "policy": POLICY,
+        "status": "PASS" if passed else "CONFLICT_REVIEW" if accepted and disagreements else "INCOMPLETE",
+        "accepted": accepted,"rip_authorization_eligible":passed and len(candidates)==1,
+        "requires_targeted_review":bool(disagreements or operational_failures),
+        "reasons": sorted(set(reasons)), "operational_failures": operational_failures,
         "normalized_priority_fields": parsed, "field_disagreements": disagreements,
+        "field_combinations":fields,"working_identification":working,
         "missing_fields": missing, "wrong_fields": wrong,
         "validated_candidates": normalized_candidates, "matches": match_rows,
         "reference_match":reference_match,
-        "missing_observations":{tag:[field for field in ("series","media_types","seasons","episodes","disc_numbers")
+        "missing_observations":{tag:[field for field in ("series","seasons","episodes","disc_numbers")
                                        if not parsed[tag][field]] for tag in MODEL_ORDER},
     }
 
 
 def _series_compatible(observations: list[str], master) -> bool:
     known = {normalize(master.series), *(normalize(alias) for alias in master.title_aliases)}
-    return any(value in known for value in observations)
+    return any(_series_relation(value,master.series)=="corroborated" or
+               any(_series_relation(value,alias)=="corroborated" for alias in master.title_aliases)
+               for value in observations if value in known or _canonical_series(value))
 
 
 def recognize(settings, images: list, event_id: str, masters: list, *, transport=None) -> dict:
     evidence_dir = settings.state / "evidence" / event_id
     result = {
-        "accepted": False, "test_only": False, "policy": "two-model-priority-field-agreement-v1",
+        "accepted": False, "test_only": False, "policy": POLICY,
         "backend": settings.recognition_backend, "camera": settings.camera,
         "model_tags": list(MODEL_ORDER), "frames": [
             {"evidence": f"{event_id}/{index}.jpg"} for index in range(len(images))
@@ -441,12 +601,12 @@ def recognize(settings, images: list, event_id: str, masters: list, *, transport
         result["agreement"] = gate_result
         result["matches"] = gate_result["matches"]
         result["accepted"] = gate_result["accepted"]
-        result["reason"] = ("Both models agree on available identity fields; reference matching is optional" if result["accepted"]
+        result["reason"] = ("Field evidence combined; each value retains model attribution and uncertainty" if result["accepted"]
                             else "; ".join(gate_result["reasons"]))
     except Exception as exc:
         # Preserve failures as reviewable evidence, never convert them to a pass.
         result["agreement"] = {
-            "policy": "two-model-priority-field-agreement-v1", "status": "REJECTED_FOR_REVIEW",
+            "policy": POLICY, "status": "INCOMPLETE",
             "accepted": False, "reasons": ["recognition_pipeline_failure"],
             "operational_failures": list(MODEL_ORDER), "normalized_priority_fields": {},
             "field_disagreements": [], "missing_fields": [], "wrong_fields": [], "matches": [],
