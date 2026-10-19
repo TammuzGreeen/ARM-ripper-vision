@@ -45,6 +45,11 @@ class Settings:
     fileflows_enabled: bool = env_bool('FILEFLOWS_ENABLED', True)
     dry_run_only: bool = env_bool('DRY_RUN_ONLY', False)
     dry_run_output_root: str = os.getenv('DRY_RUN_OUTPUT_ROOT', '/media/completed')
+    local_beta: bool = env_bool('LOCAL_BETA_ENABLED', False)
+    app_version: str = os.getenv('APP_VERSION', 'development')
+    beta_output_root: str = os.getenv('BETA_OUTPUT_ROOT', '/media/unreviewed')
+    media_host_prefix: str = os.getenv('MEDIA_HOST_PREFIX', '')
+    beta_min_free_bytes: int = int(os.getenv('BETA_MIN_FREE_BYTES', str(30 * 1024**3)))
 
     def __post_init__(self):
         if self.recognition_backend not in ('tesseract', 'ollama', 'ollama-agreement', 'llamacpp', 'openai-compatible'):
@@ -73,6 +78,10 @@ class Settings:
                 raise ValueError('ARM_URL must be an HTTP(S) base URL without credentials, query or fragment')
         if self.switch_policy not in ('review','auto') or self.ttl<10 or self.retention<1:
             raise ValueError('Invalid switch policy, capture TTL or evidence retention')
+        if self.local_beta and (self.dry_run_only or self.fileflows_enabled):
+            raise ValueError('Local beta requires DRY_RUN_ONLY=false and FILEFLOWS_ENABLED=false')
+        if self.beta_min_free_bytes < 1:
+            raise ValueError('BETA_MIN_FREE_BYTES must be positive')
 
 
 REFERENCE_SHA = 'f6ec2e3fd47cf951e89094e0a9d6999ab94d781f'

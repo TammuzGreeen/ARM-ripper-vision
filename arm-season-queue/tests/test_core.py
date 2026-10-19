@@ -282,6 +282,14 @@ class StateTests(unittest.TestCase):
         old=self.ready();self.store.new_event()
         self.assertEqual(self.store.rows('SELECT status FROM events WHERE id=?',(old,))[0]['status'],'invalidated')
 
+    def test_production_startup_invalidation_preserves_dry_run_history(self):
+        dry=self.store.new_event('dry_run_camera')
+        ordinary=self.store.new_event('camera')
+        self.store.execute("UPDATE events SET status='review' WHERE id=?",(dry,))
+        self.store.invalidate_pending(include_rejections=True)
+        self.assertEqual(self.store.rows('SELECT status FROM events WHERE id=?',(dry,))[0]['status'],'review')
+        self.assertEqual(self.store.rows('SELECT status FROM events WHERE id=?',(ordinary,))[0]['status'],'invalidated')
+
     def test_failed_rip_does_not_consume_disc(self):
         e=self.ready();self.store.pair_insertion(1,'one',180);self.store.claim(1,'batch','disc1',e,{})
         self.store.execute("UPDATE reservations SET state='failed' WHERE job=1")
@@ -312,6 +320,16 @@ class StateTests(unittest.TestCase):
         self.store.pair_insertion(1,'one',180)
         e=self.ready();self.store.pair_insertion(1,'one',180)
         self.assertIsNone(self.store.rows('SELECT job FROM events WHERE id=?',(e,))[0]['job'])
+
+    def test_camera_result_released_after_first_arm_poll_pairs_only_preexisting_event(self):
+        event=self.store.new_event()
+        self.store.pair_insertion(9,'same-insertion',180)
+        self.store.execute("UPDATE events SET status='ready',released=1 WHERE id=?",(event,))
+        self.store.pair_insertion(9,'same-insertion',180)
+        self.assertEqual(self.store.rows('SELECT job FROM events WHERE id=?',(event,))[0]['job'],9)
+        newer=self.ready()
+        self.store.pair_insertion(9,'same-insertion',180)
+        self.assertIsNone(self.store.rows('SELECT job FROM events WHERE id=?',(newer,))[0]['job'])
 
     def test_job_id_reuse_detected(self):
         self.store.pair_insertion(1,'original',180)

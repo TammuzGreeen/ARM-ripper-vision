@@ -87,7 +87,7 @@ def create_app(settings=None, start_workers=True):
 
     @app.get('/static/{filename}')
     def static(filename:str):
-        if filename not in ('app.js','style.css','dry-run.js'):
+        if filename not in ('app.js','style.css','dry-run.js','beta-review.js'):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent.parent/'static'/filename)
 
@@ -174,6 +174,23 @@ def create_app(settings=None, start_workers=True):
         body = json.loads(await limited(request))
         await asyncio.to_thread(controller.action,body['action'],body.get('job'),body.get('disc'))
         return {'ok':True}
+
+    @app.get('/api/local-beta/reviews')
+    def local_beta_reviews(status: str = 'all'):
+        if not settings.local_beta:
+            raise HTTPException(404)
+        allowed={'all','awaiting_review','reviewed','accepted','needs_attention','failed'}
+        if status not in allowed:
+            raise HTTPException(400,'Unknown review filter')
+        rows=[r for r in controller.snapshot()['reservations'] if r.get('workflow')=='local-beta-v1']
+        if status!='all':
+            rows=[r for r in rows if r.get('state')==status or (status=='failed' and r.get('state') in ('failed','review'))]
+        return {'items':rows}
+
+    @app.post('/api/local-beta/jobs/{job}/review')
+    async def local_beta_review(job:int, request:Request):
+        body=json.loads(await limited(request))
+        return await asyncio.to_thread(controller.review_local_beta,job,body.get('action'),body)
 
     @app.post('/api/camera/calibrate')
     def calibrate():

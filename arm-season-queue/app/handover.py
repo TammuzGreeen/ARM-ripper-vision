@@ -134,6 +134,34 @@ def inspect_file(path, required, duration, decode=True):
     return {'bytes':before[0],'sha256':hashed,'probe':probe,'validation':result}
 
 
+def inspect_beta_file(path, duration, decode=True):
+    """Validate a local beta output without pretending its unknown source inventory is known."""
+    path = Path(path)
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise ValueError('Completed beta output is missing or empty')
+    before=(path.stat().st_size,path.stat().st_mtime_ns)
+    proc=subprocess.run(['ffprobe','-v','error','-show_streams','-show_chapters','-show_format','-of','json',str(path)],
+                        check=True,capture_output=True,timeout=120)
+    probe=json.loads(proc.stdout)
+    streams=probe.get('streams',[])
+    video=[s for s in streams if s.get('codec_type')=='video' and not s.get('disposition',{}).get('attached_pic')]
+    if not video:
+        raise ValueError('Completed beta output has no readable video stream')
+    actual=float(probe.get('format',{}).get('duration') or 0)
+    if not actual or abs(actual-duration)>max(15,duration*.01):
+        raise ValueError('Completed beta output duration differs substantially from the ARM source scan')
+    if decode:
+        subprocess.run(['ffmpeg','-nostdin','-v','error','-xerror','-i',str(path),'-map','0:v:0','-map','0:a?','-f','null','-'],
+                       check=True,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,timeout=7200)
+    hashed=checksum(path)
+    if before!=(path.stat().st_size,path.stat().st_mtime_ns):
+        raise ValueError('Beta output changed during validation')
+    return {'bytes':before[0],'sha256':hashed,'probe':probe,
+            'validation':{'video_stream':'present','duration_seconds':actual,
+                          'decode':'passed' if decode else 'not_run',
+                          'source_inventory':'unknown; provisional beta'}}
+
+
 def copy_verified(src,dest,expected):
     if checksum(src)!=expected:
         raise ValueError('Source changed since manifest creation')

@@ -59,6 +59,9 @@ class Camera:
         self.event_started_at = None
         self.samples = []
         self.full_samples = []
+        self.best_fallback = None
+        self.best_fallback_full = None
+        self.best_fallback_sharpness = -1.0
         self.short_transcriptions = {}
         self.diagnostic_busy = False
         self.status = {'connected':False, 'message':'Connecting to camera', 'calibrated':False,
@@ -297,10 +300,17 @@ class Camera:
                             self.event_started_at = time.monotonic()
                             self.samples = []
                             self.full_samples = []
+                            self.best_fallback = None
+                            self.best_fallback_full = None
+                            self.best_fallback_sharpness = -1.0
                             self.collecting = False
                             self.submitted = False
                             self.capture_failed = False
                         action = self.gate.observe(present, stable, sharp>=self.s.sharpness and glare<.55)
+                        if self.event and present and stable and glare < .55 and sharp > self.best_fallback_sharpness:
+                            self.best_fallback = frame.copy()
+                            self.best_fallback_full = self.full_frame.copy()
+                            self.best_fallback_sharpness = float(sharp)
                         # Release also needs to work for an object that never became sharp enough.
                         if not present and self.gate.empty>=8 and self.event:
                             self.release(self.event)
@@ -336,9 +346,17 @@ class Camera:
                             self.submitted = True
                             self.capture_failed = True
                             self.collecting = False
-                            self.on_result(self.event, {'accepted':False,'frames':[],
-                                'reason':f'No stable, sharp camera capture within {self.s.presentation_timeout} seconds; review or continue with drive scan'})
-                            self.status['message'] = 'Camera capture timed out; drive scan may continue in dry-run review'
+                            if self.best_fallback is not None:
+                                quality={'mode':'best-frame-fallback','sharpness':round(self.best_fallback_sharpness,2),
+                                         'required_sharpness':self.s.sharpness,'reduced_quality':True,
+                                         'independent_frame_consensus':False}
+                                self.future=self.pool.submit(self.process,self.event,[self.best_fallback.copy()],False,
+                                                             'webcam',False,[self.best_fallback_full.copy()],quality)
+                                self.status['message']='Sharp-frame threshold missed; processing retained best stable frame for provisional review'
+                            else:
+                                self.on_result(self.event, {'accepted':False,'frames':[],
+                                    'reason':f'No stable camera frame within {self.s.presentation_timeout} seconds; no image reused'})
+                                self.status['message'] = 'Camera capture timed out; no usable frame; insertion will remain held'
                     self.previous = small
                 self.stop.wait(.15)
             except Exception as exc:
@@ -362,7 +380,7 @@ class Camera:
             cap.release()
 
     def process(self, event, images, test_only=False, source='webcam', preserve_existing=False,
-                original_images=None):
+                original_images=None, capture_quality=None):
         results = []
         vision = self.s.recognition_backend != 'tesseract'
         try:
@@ -418,6 +436,8 @@ class Camera:
             if originals:
                 result['original_evidence'] = [f'{event}/{path.name}' for path in originals]
             result.setdefault('camera', self.s.camera)
+            if capture_quality:
+                result['capture_quality']=capture_quality
             self.on_result(event, result)
             with self.lock:
                 self.status['message'] = result['reason']
@@ -425,6 +445,8 @@ class Camera:
             reason = str(exc) if isinstance(exc, VisionError) else 'Image recognition failed; check service configuration and try again'
             failure = {'accepted':False, 'test_only':test_only or vision,
                        'frames':results, 'reason':reason, 'backend':self.s.recognition_backend}
+            if capture_quality:
+                failure['capture_quality']=capture_quality
             if isinstance(exc, VisionError):
                 failure['diagnostics'] = exc.diagnostic()
             originals = sorted(evidence.glob('original*.jpg')) if evidence.exists() else []

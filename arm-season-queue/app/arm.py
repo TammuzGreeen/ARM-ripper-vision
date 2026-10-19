@@ -120,6 +120,51 @@ class ARM:
                 raise ValueError('ARM naming preview differs from the staging plan')
         return preview
 
+    def configure_provisional(self, job, identity, mapping):
+        """Configure every technically valid ARM source with collision-safe review names."""
+        self.held()
+        detail = self.detail(job)
+        if detail['job']['status'] != 'manual_paused' or detail['job'].get('manual_start'):
+            raise ValueError('Job is no longer safely waiting')
+        config = detail['config']
+        if (not enabled(config.get('SKIP_TRANSCODE')) or config.get('RIPMETHOD') != 'mkv'
+                or enabled(config.get('MAINFEATURE')) or int(config.get('MINLENGTH', -1)) != 0
+                or int(config.get('MAXLENGTH', -1)) != 99998):
+            raise ValueError('Job was created with incompatible lossless per-title settings')
+        selected = {item['arm_track_id']: item for item in mapping}
+        if not selected or len(selected) != len(mapping) or len(selected) != len(detail['tracks']):
+            raise ValueError('Provisional beta must explicitly select every scanned source title')
+        for track in detail['tracks']:
+            number = int(track['track_number'])
+            length = int(track.get('length') or 0)
+            if track['track_id'] not in selected or number < 0 or not 0 < length <= 99998:
+                raise ValueError(f'ARM source title {number} is not technically selectable')
+        self.call('POST', f'/jobs/{job}/pause', {'paused': True})
+        # No guessed season/episode is sent to ARM when identity is uncertain.
+        self.call('POST', f'/jobs/{job}/multi-title', {'enabled': True})
+        folder = f'arm-season-queue/job-{job}'
+        self.call('PATCH', f'/jobs/{job}/naming', {'folder_pattern_override': folder})
+        for track in detail['tracks']:
+            item = selected[track['track_id']]
+            self.call('PATCH', f"/jobs/{job}/tracks/{track['track_id']}", {
+                'enabled': True, 'episode_number': '0',
+                'episode_name': item['content_name'], 'custom_filename': item['basename'],
+            })
+        reread = self.detail(job)
+        for track in reread['tracks']:
+            item = selected[track['track_id']]
+            if (not track.get('enabled') or track.get('custom_filename') != item['basename']
+                    or str(track.get('episode_number')) != '0'):
+                raise ValueError('ARM did not retain provisional title selection/naming')
+        preview = self.call('GET', f'/jobs/{job}/naming-preview')
+        by_id = {int(t['track_number']): t for t in preview['tracks']}
+        for item in mapping:
+            rendered = by_id.get(item['makemkv_id'], {})
+            if (rendered.get('rendered_title') != item['basename']
+                    or rendered.get('rendered_folder') != folder):
+                raise ValueError('ARM provisional naming preview differs from the collision-safe plan')
+        return preview
+
 
 def job_identity(job):
     return digest({key:job.get(key) for key in ('job_id','start_time','devpath','source_type')})

@@ -84,7 +84,8 @@ class Store:
                 # evidence. Dry-run evidence uses an isolated audit namespace.
                 old_rejections = list(db.execute("""SELECT r.id,r.body FROM rejected_rips r
                     JOIN events e ON e.id=r.event
-                    WHERE e.job IS NULL AND e.status IN ('ready','rejected_for_review')"""))
+                    WHERE e.job IS NULL AND e.status IN ('ready','rejected_for_review')
+                    AND json_extract(e.body,'$.source') NOT LIKE 'dry_run_%'"""))
                 for rejection in old_rejections:
                     body = json.loads(rejection['body'])
                     body.setdefault('audit_trail', []).append({
@@ -96,7 +97,9 @@ class Store:
                                (encode(body), rejection['id']))
                     db.execute("UPDATE events SET status='invalidated' WHERE id=(SELECT event FROM rejected_rips WHERE id=?) AND job IS NULL",
                                (rejection['id'],))
-                db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ('processing','ready','review','rejected_for_review')")
+                db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL "
+                           "AND status IN ('processing','ready','review','rejected_for_review') "
+                           "AND json_extract(body,'$.source') NOT LIKE 'dry_run_%'")
             db.execute('INSERT INTO events(id,created,status,body) VALUES (?,?,?,?)',
                        (event, time.time(), 'processing', encode({'source': source})))
         return event
@@ -153,15 +156,19 @@ class Store:
             if prior:
                 if prior['identity'] != identity:
                     raise ValueError('ARM job ID reused / database replaced; establish a new state directory')
-                return
-            db.execute('INSERT INTO seen VALUES (?,?,?)', (job, identity, now))
-            candidates = list(db.execute("SELECT id,status FROM events WHERE job IS NULL AND status IN ('processing','ready','rejected_for_review') AND created>=? AND created<=? AND released=1", (now-ttl, now)))
+            else:
+                db.execute('INSERT INTO seen VALUES (?,?,?)', (job, identity, now))
+            # Recognition may finish after ARM has already exposed its waiting
+            # job. Recheck the exact still-current job on every poll; a first
+            # empty candidate set must not permanently strand that insertion.
+            candidate_cutoff = prior['first_seen'] if prior else now
+            candidates = list(db.execute("SELECT id,status FROM events WHERE job IS NULL AND status IN ('processing','ready','rejected_for_review') AND created>=? AND created<=? AND released=1 AND json_extract(body,'$.source') NOT LIKE 'dry_run_%'", (candidate_cutoff-ttl, candidate_cutoff)))
             if len(candidates) == 1:
                 db.execute('UPDATE events SET job=? WHERE id=?', (job, candidates[0]['id']))
                 db.execute('UPDATE rejected_rips SET job=? WHERE event=? AND job IS NULL',
                            (job, candidates[0]['id']))
             else:
-                db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ('processing','ready','rejected_for_review')")
+                db.execute("UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ('processing','ready','rejected_for_review') AND json_extract(body,'$.source') NOT LIKE 'dry_run_%'")
                 for candidate in candidates:
                     if candidate['status'] == 'rejected_for_review':
                         row = db.execute('SELECT id,body FROM rejected_rips WHERE event=?', (candidate['id'],)).fetchone()
@@ -192,7 +199,8 @@ class Store:
             rows = []
             if include_rejections:
                 rows = list(db.execute('''SELECT r.id,r.body FROM rejected_rips r JOIN events e ON e.id=r.event
-                                          WHERE e.job IS NULL AND e.status IN ('ready','rejected_for_review') '''))
+                                          WHERE e.job IS NULL AND e.status IN ('ready','rejected_for_review')
+                                          AND json_extract(e.body,'$.source') NOT LIKE 'dry_run_%' '''))
             for row in rows:
                 body = json.loads(row['body'])
                 body.setdefault('ejection', {})['status'] = 'capture_invalidated'
@@ -203,4 +211,5 @@ class Store:
                 db.execute("UPDATE rejected_rips SET ejection_status='capture_invalidated',body=? WHERE id=?",
                            (encode(body), row['id']))
             states = "'processing','ready','review','rejected_for_review'" if include_rejections else "'processing','ready','review'"
-            db.execute(f"UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ({states})")
+            db.execute(f"UPDATE events SET status='invalidated' WHERE job IS NULL AND status IN ({states}) "
+                       "AND json_extract(body,'$.source') NOT LIKE 'dry_run_%'")

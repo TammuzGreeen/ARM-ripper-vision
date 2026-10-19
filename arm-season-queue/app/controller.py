@@ -2,18 +2,20 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
 
 from .arm import ARM, job_identity, plan, structure
 from .agreement import (MODEL_ORDER, POLICY as FIELD_EVIDENCE_POLICY, evaluate as evaluate_agreement,
                         normalize as normalize_printed, preflight as agreement_preflight)
-from .formats import Masterlist, digest, rip_readiness
+from .formats import Masterlist, digest, rip_readiness, safe_name
 from .dry_run import build_plan as build_dry_run_plan, parse_info
-from .handover import beneath, canonical, inspect_file, publish_json
+from .handover import beneath, canonical, inspect_beta_file, inspect_file, publish_json
 from .recognition import match
 from .state import Store, encode
 
@@ -110,8 +112,11 @@ class Controller:
         self.db.put('preflight',arm)
         self.db.put('agreement_preflight',models)
         storage = {}
-        for name, path, writable in (('state',self.s.state,True),('queue_media',self.s.media,False),
-                                     ('handover',self.s.handover,self.s.fileflows_enabled)):
+        paths=[('state',self.s.state,True),('queue_media',self.s.media,False),
+               ('handover',self.s.handover,self.s.fileflows_enabled)]
+        if getattr(self.s,'local_beta',False):
+            paths.append(('beta_output',Path(self.s.beta_output_root),True))
+        for name, path, writable in paths:
             try:
                 fs=os.statvfs(path)
                 storage[name]={'available':path.is_dir(),'writable':os.access(path,os.W_OK),
@@ -142,7 +147,7 @@ class Controller:
             master = next((m for m in self.masters() if m.id==master_id),None) if master_id else None
             if master_id and master is None:
                 raise ValueError('Optional batch context does not identify a loaded reference')
-            if master is not None and not master.approved:
+            if master is not None and not master.approved and not getattr(self.s,'local_beta',False):
                 raise ValueError('Optional batch context must use confirmed technical instructions; leave it empty for unrestricted recognition')
             self.baseline()
             return self.select_batch(master)
@@ -550,6 +555,17 @@ class Controller:
                 and not agreement.get('operational_failures') and fields_clear)
 
     @staticmethod
+    def local_beta_capture_usable(result):
+        """Permit a fresh camera presentation to proceed with explicit uncertainty."""
+        if not isinstance(result, dict) or result.get('test_only'):
+            return False
+        if result.get('backend') != 'ollama-agreement' and result.get('camera') is None:
+            return False
+        # A frame-backed capture can still be scanned when a model is unavailable,
+        # partial, or contradictory. The full evidence is retained for review.
+        return bool(result.get('frames'))
+
+    @staticmethod
     def human_retry_authorized(recognition):
         review = (recognition or {}).get('review') or {}
         matches = (recognition or {}).get('matches') or []
@@ -654,7 +670,8 @@ class Controller:
         matched_reference = next((m for m in results if matches and m.id==matches[0].get('master')),None)
         pass_result = bool(field_evidence_valid and len(matches)==1 and matched_reference and matched_reference.approved)
         automatic_source = result.get('camera') is not None or result.get('backend') == 'ollama-agreement'
-        status = 'ready' if pass_result else 'review'
+        beta_capture = bool(getattr(self.s,'local_beta',False) and automatic_source and self.local_beta_capture_usable(result))
+        status = 'ready' if pass_result or beta_capture else 'review'
         if not result.get('accepted',False) and automatic_source:
             result['accepted'] = False
             if not result.get('reason'):
@@ -667,7 +684,7 @@ class Controller:
                 event_source = body.get('source')
                 if event_source in ('vision_test', 'manual_test'):
                     status = 'review'
-                elif event_source == 'camera' and not pass_result:
+                elif event_source == 'camera' and not (pass_result or beta_capture):
                     status = 'rejected_for_review'
                 # A slow inference must not revive a capture whose TTL elapsed
                 # before the periodic expiry sweep ran. Retain its full model
@@ -1095,6 +1112,17 @@ class Controller:
         if detail['job']['status']!='manual_paused':
             return
         body = json.loads(event['body'])
+        if getattr(self.s,'local_beta',False):
+            if not self.local_beta_capture_usable((body.get('result') or {})):
+                body.setdefault('result', {})['reason'] = 'Fresh camera evidence is incomplete; insertion held for review'
+                self.db.execute("UPDATE events SET status='review',body=? WHERE id=?", (encode(body), event['id']))
+                return
+            try:
+                self.reserve_local_beta(event, batch, detail, body)
+            except Exception as exc:
+                body.setdefault('result', {})['reason'] = 'Local beta did not start this insertion: ' + str(exc)
+                self.db.execute("UPDATE events SET status='review',body=? WHERE id=?", (encode(body), event['id']))
+            return
         if not self.human_authorization_current(event['id'], body.get('result')):
             body['result']['reason'] = 'Human correction changed or was resolved after authorization; confirm the current correction again'
             self.db.execute("UPDATE events SET status='review',released=0,body=? WHERE id=?", (encode(body),event['id']))
@@ -1145,12 +1173,127 @@ class Controller:
             body['result']['reason']='Disc already reserved/completed, or reservation failed: '+str(exc)
             self.db.execute("UPDATE events SET status='review',body=? WHERE id=?",(encode(body),event['id']))
 
+    def reserve_local_beta(self, event, batch, detail, body):
+        """Reserve every readable ARM source title, using provisional names when unmapped."""
+        job = detail['job']['job_id']
+        self.arm.held()
+        if detail['job'].get('devpath') != self.s.drive or detail['job'].get('manual_start'):
+            raise ValueError('Current ARM insertion is not safely held in the configured drive')
+        drive = next((d for d in self.arm.call('GET', '/drives').get('drives', [])
+                      if d.get('mount') == self.s.drive), None)
+        if not drive or drive.get('job_id_current') != job or drive.get('drive_mode') != 'auto':
+            raise ValueError('ARM drive no longer reports this exact held insertion')
+        if len([d for d in self.arm.call('GET', '/drives').get('drives', [])
+                if d.get('job_id_current')]) != 1:
+            raise ValueError('More than one ARM drive has a current job')
+        active=[item for item in self.arm.jobs()
+                if item.get('status') not in ('success','fail','cancelled')]
+        if [item.get('job_id') for item in active] != [job]:
+            raise ValueError('ARM has another active job; refusing concurrent beta execution')
+        output_root = Path(self.s.beta_output_root)
+        output_root.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(output_root).free
+        if free < self.s.beta_min_free_bytes:
+            raise ValueError(f'Insufficient local beta space: {free} bytes free; require {self.s.beta_min_free_bytes}')
+        tracks = detail.get('tracks') or []
+        numbers = [int(track['track_number']) for track in tracks]
+        if not tracks or len(set(numbers)) != len(numbers):
+            raise ValueError('ARM scan returned no sources or duplicate source-title IDs')
+        if any(n < 0 for n in numbers):
+            raise ValueError('ARM scan returned an invalid source-title ID')
+        identity = ((body.get('result') or {}).get('agreement') or {}).get('working_identification') or {}
+        existing_matches = body.get('matches') or []
+        selected_master = None
+        if len(existing_matches) == 1:
+            selected_master = next((m for m in self.masters() if m.id == existing_matches[0].get('master')), None)
+        confirmed_mapping = None
+        selected_disc = None
+        if selected_master and selected_master.approved:
+            selected_disc = next((d for d in selected_master.discs
+                                  if d.id == existing_matches[0].get('disc')), None)
+            if selected_disc:
+                try:
+                    confirmed_mapping = plan(selected_master, selected_disc, detail)
+                except (ValueError, StopIteration):
+                    confirmed_mapping = None
+        source_folder = PurePosixPath('arm-season-queue', f'job-{job}')
+        if confirmed_mapping:
+            mapping = confirmed_mapping
+            for item in mapping:
+                item['destination'] = str(PurePosixPath(self.s.beta_output_root) / source_folder / (item['basename'] + '.mkv'))
+                item['provisional'] = False
+            selected_ids = {int(item['makemkv_id']) for item in mapping}
+            excluded = [{'makemkv_id':int(t['track_number']), 'reason':'Not selected by this compatible confirmed masterlist mapping'}
+                        for t in tracks if int(t['track_number']) not in selected_ids]
+            policy = 'all sources selected by compatible approved masterlist; explicit exclusions recorded'
+            mapping_source = 'approved masterlist mapping'
+        else:
+            mapping = []
+            for track in sorted(tracks, key=lambda t: int(t['track_number'])):
+                number = int(track['track_number'])
+                if not 0 < int(track.get('length') or 0) <= 99998:
+                    raise ValueError(f'Source title {number} is outside the supported per-title length range')
+                basename = f'Source Title {number:03d} - PROVISIONAL'
+                dest = PurePosixPath(self.s.beta_output_root) / source_folder / f'{basename}.mkv'
+                path = beneath(self.s.media, str(dest.relative_to(PurePosixPath(self.s.media))))
+                if path.exists():
+                    raise ValueError(f'Output already exists; refusing overwrite: {path}')
+                mapping.append({
+                    'arm_track_id': track['track_id'], 'makemkv_id': number,
+                    'episode': None, 'content_name': f'Source Title {number:03d}',
+                    'version': None, 'basename': basename,
+                    'destination': str(dest), 'destination_kind': 'provisional local beta output',
+                    'mapping_evidence': 'source-title ID only; episode identity unresolved',
+                    'inventory': None, 'scan_duration': int(track['length']), 'scan': track,
+                    'provisional': True,
+                })
+            selected_ids = {int(item['makemkv_id']) for item in mapping}
+            excluded = []
+            policy = 'all ARM-prescanned selectable source titles'
+            mapping_source = 'provisional source-title IDs'
+        for item in mapping:
+            dest_path = beneath(self.s.media, str(PurePosixPath(item['destination']).relative_to(PurePosixPath(self.s.media))))
+            if dest_path.exists():
+                raise ValueError(f'Output already exists; refusing overwrite: {dest_path}')
+        disc_id = selected_disc.id if confirmed_mapping and selected_disc else f'local-source-job-{job}'
+        recognition_result=body.get('result') or {}
+        warnings=list((recognition_result.get('agreement') or {}).get('reasons') or [])
+        if recognition_result.get('reason') and not recognition_result.get('accepted'):
+            warnings.append(recognition_result['reason'])
+        if recognition_result.get('capture_quality'):
+            warnings.append('Reduced-quality camera fallback: '+json.dumps(recognition_result['capture_quality'],sort_keys=True))
+        payload = {
+            'workflow': 'local-beta-v1', 'masterlist': selected_master.model_dump() if selected_master else None,
+            'masterlist_sha256': digest(selected_master) if selected_master else None,
+            'recognition': body, 'identity': job_identity(detail['job']),
+            'observed_label': detail['job'].get('label'), 'structure_signature': structure(detail),
+            'source_titles': tracks, 'selection_policy': policy,
+            'selected_titles': mapping, 'excluded_titles': excluded, 'mapping': mapping,
+            'mapping_source': mapping_source, 'identity_fields': identity,
+            'warnings': list(dict.fromkeys(warnings)),
+        }
+        try:
+            self.db.claim(job, batch['id'], disc_id, event['id'], payload)
+        except Exception as exc:
+            raise ValueError('Insertion was already reserved or could not be claimed: ' + str(exc)) from exc
+
     def advance(self, row, running, current):
         job = row['job']
         payload = json.loads(row['body'])
+        if payload.get('workflow') == 'local-beta-v1' and row['state'] in (
+                'awaiting_review', 'reviewed', 'accepted', 'needs_attention'):
+            return
         detail = self.arm.detail(job)
         if job_identity(detail['job'])!=payload['identity']:
             raise ValueError('ARM job identity changed')
+        if payload.get('workflow') == 'local-beta-v1':
+            payload['arm_progress']={'status':detail['job'].get('status'),
+                                     'updated_at':time.time(),
+                                     'tracks':[{'makemkv_id':t.get('track_number'),
+                                                'status':t.get('status'),'ripped':t.get('ripped'),
+                                                'error':t.get('error'),'enabled':t.get('enabled')}
+                                               for t in detail.get('tracks',[])]}
+            self.db.execute('UPDATE reservations SET body=? WHERE job=?',(encode(payload),job))
         status = detail['job']['status']
         if row['state']=='ripped':
             self.read_ack(row)
@@ -1178,14 +1321,21 @@ class Controller:
             return
         if row['state']=='reserved' and running and current==job and row['batch']==self.db.get('active_batch'):
             saved_result = (payload.get('recognition') or {}).get('result')
-            if not self.human_authorization_current(row['event'], saved_result):
+            if payload.get('workflow') != 'local-beta-v1' and not self.human_authorization_current(row['event'], saved_result):
                 raise ValueError('Human correction changed or was resolved after reservation; rip start blocked')
-            if not (self.agreement_authorized(saved_result) or self.human_retry_authorized(saved_result)):
+            if (payload.get('workflow') != 'local-beta-v1'
+                    and not (self.agreement_authorized(saved_result) or self.human_retry_authorized(saved_result))):
                 raise ValueError('Stored recognition lacks exact-model agreement or explicit fresh-capture human authorization; rip start blocked')
             if structure(detail)!=payload['structure_signature']:
                 raise ValueError('Prescanned title structure changed before configuration')
-            master = Masterlist.model_validate(payload['masterlist'])
-            preview = self.arm.configure(job,master,payload['mapping'])
+            if payload.get('workflow') == 'local-beta-v1':
+                if payload.get('mapping_source') == 'approved masterlist mapping':
+                    preview = self.arm.configure(job,Masterlist.model_validate(payload['masterlist']),payload['mapping'])
+                else:
+                    preview = self.arm.configure_provisional(job,payload.get('identity_fields') or {},payload['mapping'])
+            else:
+                master = Masterlist.model_validate(payload['masterlist'])
+                preview = self.arm.configure(job,master,payload['mapping'])
             payload['naming_preview']=preview
             self.db.execute("UPDATE reservations SET body=?,state='starting' WHERE job=?",(encode(payload),job))
             # Persist intent before a non-idempotent network operation; never blindly retry start.
@@ -1198,6 +1348,9 @@ class Controller:
         try:
             job = row['job']
             payload = json.loads(self.db.rows('SELECT body FROM reservations WHERE job=?',(job,))[0]['body'])
+            if payload.get('workflow') == 'local-beta-v1':
+                self.finish_local_beta(row,detail,payload)
+                return
             master = Masterlist.model_validate(payload['masterlist'])
             disc = next(d for d in master.discs if d.id==row['disc'])
             tracks = {t['track_id']:t for t in detail['tracks']}
@@ -1240,6 +1393,212 @@ class Controller:
             self.db.execute("UPDATE reservations SET state='ripped',publication=?,error='' WHERE job=?",(publication,job))
         except Exception as exc:
             self.db.execute("UPDATE reservations SET state='review',error=? WHERE job=?",(str(exc),row['job']))
+
+    def finish_local_beta(self, row, detail, payload):
+        job = row['job']
+        tracks = {t['track_id']: t for t in detail.get('tracks', [])}
+        preview = {int(t['track_number']): t for t in (payload.get('naming_preview') or {}).get('tracks', [])}
+        base = PurePosixPath(detail['job'].get('path') or '')
+        if not base.is_absolute():
+            raise ValueError('ARM did not report an absolute completed-job path')
+        outputs=[]
+        for entry in payload['mapping']:
+            track = tracks.get(entry['arm_track_id'])
+            if not track or not track.get('ripped') or track.get('error') or track.get('process') is False:
+                raise ValueError(f"Required selected source title {entry['makemkv_id']} did not complete")
+            rendered = preview.get(int(entry['makemkv_id']))
+            if not rendered:
+                raise ValueError('ARM naming preview omitted a selected source title')
+            source = base / PurePosixPath(rendered['rendered_folder']) / (rendered['rendered_title'] + '.mkv')
+            relative = str(source.relative_to(PurePosixPath(self.s.arm_media)))
+            path = beneath(self.s.media, relative)
+            checked = (inspect_file(path,entry['inventory'],entry['scan_duration'])
+                       if entry.get('inventory') else inspect_beta_file(path, entry['scan_duration']))
+            outputs.append({**entry, 'arm_output_path':str(source), 'media_relative_path':relative,
+                            'actual_path':str(path),
+                            'host_path':str(Path(getattr(self.s,'media_host_prefix',''))/relative) if getattr(self.s,'media_host_prefix','') else str(path),
+                            'original_filename':path.name,
+                            'actual_filename':path.name, **checked})
+        terminal = self.arm.detail(job)
+        if terminal['job']['status'] != 'success' or job_identity(terminal['job']) != payload['identity']:
+            raise ValueError('ARM completion changed during local output verification')
+        now=time.time()
+        review = {'schema_version':1,'job':job,'event':row['event'],'batch':row['batch'],
+                  'status':'awaiting_review','workflow':'local-beta-v1','created_at':now,
+                  'application_version':self.s.app_version,'recognition':payload['recognition'],
+                  'arm_progress':payload.get('arm_progress'),
+                  'observed_label':payload.get('observed_label'),
+                  'identity_fields':payload.get('identity_fields',{}),
+                  'model_metadata':{'tags':(payload['recognition'].get('result') or {}).get('model_tags',[]),
+                                    'digests':{tag:data.get('model_digest') for tag,data in
+                                               ((payload['recognition'].get('result') or {}).get('runs') or {}).items()},
+                                    'backend':(payload['recognition'].get('result') or {}).get('backend'),
+                                    'prompt_version':(payload['recognition'].get('result') or {}).get('policy'),
+                                    'request_files':{tag:data.get('request_file') for tag,data in
+                                                     ((payload['recognition'].get('result') or {}).get('runs') or {}).items()},
+                                    'settings':{'camera':self.s.camera,'rotation':self.s.camera_rotation,
+                                                'roi':self.s.roi,'sharpness_threshold':self.s.sharpness,
+                                                'vision_timeout_seconds':self.s.vision_timeout}},
+                  'masterlist':payload.get('masterlist'),'masterlist_sha256':payload.get('masterlist_sha256'),
+                  'masterlist_provenance':(payload.get('masterlist') or {}).get('provenance',[]),
+                  'scan':payload['source_titles'],'selection_policy':payload['selection_policy'],
+                  'selected_titles':payload['selected_titles'],'excluded_titles':payload['excluded_titles'],
+                  'mapping_source':payload['mapping_source'],'outputs':outputs,'warnings':payload.get('warnings',[]),
+                  'review_history':[],'feedback':{'reviewed_fields':[],'corrections':[]}}
+        publish_json(self.s.state/'reviews'/f'{job}.json',review)
+        payload['local_review']=review
+        self.db.execute("UPDATE reservations SET body=?,state='awaiting_review',publication='local_review',error='' WHERE job=?",
+                        (encode(payload),job))
+
+    def review_local_beta(self, job, action, request):
+        if not getattr(self.s,'local_beta',False):
+            raise ValueError('Local beta review is not enabled')
+        if action not in ('accept','save_reviewed','needs_attention'):
+            raise ValueError('Unknown local review action')
+        with self.lock:
+            rows=self.db.rows('SELECT * FROM reservations WHERE job=?',(job,))
+            if len(rows)!=1:
+                raise ValueError('Local beta job not found')
+            row=rows[0]
+            payload=json.loads(row['body'])
+            if payload.get('workflow')!='local-beta-v1' or row['state'] not in ('awaiting_review','reviewed','accepted','needs_attention'):
+                raise ValueError('Job is not an idle local beta review')
+            review=payload.get('local_review') or {}
+            corrections=request.get('corrections') or {}
+            if not isinstance(corrections,dict):
+                raise ValueError('Corrections must be keyed by MakeMKV source-title ID')
+            identity_correction=request.get('identity') or {}
+            if not isinstance(identity_correction,dict) or set(identity_correction)-{'series','season'}:
+                raise ValueError('Identity corrections may contain series and season only')
+            if identity_correction.get('series') is not None and not str(identity_correction['series']).strip():
+                raise ValueError('Corrected series/title cannot be empty')
+            if identity_correction.get('season') is not None and (not str(identity_correction['season']).isdigit()
+                    or int(identity_correction['season']) > 99):
+                raise ValueError('Corrected season must be numeric')
+            reviewed_fields=request.get('reviewed_fields') or []
+            if not isinstance(reviewed_fields,list) or set(reviewed_fields)-{'identity','episodes','files','selection'}:
+                raise ValueError('Reviewed-field checklist contains an unsupported value')
+            outputs=review.get('outputs') or []
+            by_id={str(o['makemkv_id']):o for o in outputs}
+            if set(corrections)-set(by_id):
+                raise ValueError('Correction references a source title outside this job')
+            planned=[]
+            for source_id, fields in corrections.items():
+                if not isinstance(fields,dict):
+                    raise ValueError('Each title correction must be an object')
+                output=by_id[source_id]
+                allowed={'series','season','episode_number','episode_range','episode_name','version','filename'}
+                if set(fields)-allowed:
+                    raise ValueError('Unsupported correction field')
+                filename=fields.get('filename')
+                if filename is None and (fields.get('episode_number') is not None or fields.get('episode_range')):
+                    identity={**(review.get('identity_fields') or {}),
+                              'series_display':identity_correction.get('series') or (review.get('identity_fields') or {}).get('series_display'),
+                              'season':identity_correction.get('season') if identity_correction.get('season') is not None else (review.get('identity_fields') or {}).get('season')}
+                    series=fields.get('series') or identity.get('series_display') or identity.get('series') or 'Unidentified'
+                    season=fields.get('season') if fields.get('season') is not None else identity.get('season')
+                    if season is None:
+                        raise ValueError('Add a season or provide an explicit filename before assigning an episode')
+                    ep=fields.get('episode_range') or str(int(fields['episode_number'])).zfill(2)
+                    if not re.fullmatch(r'\d{1,3}(?:-\d{1,3})?',str(ep)):
+                        raise ValueError('Episode number/range must be numeric, for example 03 or 03-04')
+                    if fields.get('episode_number') is not None and int(fields['episode_number']) < 1:
+                        raise ValueError('Episode number must be positive')
+                    stem=f"{safe_name(str(series))} S{int(season):02d}E{ep}"
+                    if fields.get('episode_name'):
+                        stem+=' - '+safe_name(str(fields['episode_name']))
+                    elif not output.get('provisional') and (output.get('episode') or {}).get('title'):
+                        stem+=' - '+safe_name(str(output['episode']['title']))
+                    version=fields.get('version') or (output.get('human_metadata') or {}).get('version') or output.get('version')
+                    if version:
+                        stem+=' - '+safe_name(str(version))
+                    filename=stem+'.mkv'
+                if filename is not None:
+                    if not isinstance(filename,str) or filename in ('','.','..') or '/' in filename or '\\' in filename:
+                        raise ValueError('Filename must be a single safe .mkv filename')
+                    filename=safe_name(Path(filename).stem)+'.mkv'
+                    old=Path(output['actual_path'])
+                    dest=old.with_name(filename)
+                    if dest.parent != old.parent:
+                        raise ValueError('Corrections cannot move output outside its job directory')
+                    planned.append((output,old,dest,fields))
+                else:
+                    planned.append((output,None,None,fields))
+            destinations=[str(dest) for _,old,dest,_ in planned if dest is not None]
+            if len(set(destinations))!=len(destinations):
+                raise ValueError('Two corrected titles would have the same filename')
+            source_paths={str(old) for _,old,_,_ in planned if old is not None}
+            for _,old,dest,_ in planned:
+                if dest is not None and dest.exists() and str(dest) not in source_paths:
+                    raise ValueError(f'Filename already exists; refusing overwrite: {dest}')
+                if old is not None and (not old.is_file() or old.stat().st_size<=0):
+                    raise ValueError(f'Expected local output is missing: {old}')
+            revision=len(review.get('review_history',[]))+1
+            changes=[]
+            temps=[]
+            try:
+                for index,(output,old,dest,fields) in enumerate(planned):
+                    if old is None or dest==old:
+                        continue
+                    temp=old.with_name(f'.{old.name}.review-{job}-{revision}-{index}.pending')
+                    if temp.exists():
+                        raise ValueError('A previous interrupted correction needs recovery before review')
+                    old.rename(temp)
+                    temps.append((old,temp,dest,output))
+                for old,temp,dest,output in temps:
+                    if dest.exists():
+                        raise ValueError(f'Filename appeared during correction; refusing overwrite: {dest}')
+                    temp.rename(dest)
+                    output['actual_path']=str(dest)
+                    output['actual_filename']=dest.name
+                    output['bytes']=dest.stat().st_size
+                    changes.append({'makemkv_id':output['makemkv_id'],'from':str(old),'to':str(dest)})
+            except Exception:
+                for old,temp,dest,output in reversed(temps):
+                    if dest.exists() and not temp.exists():
+                        dest.rename(temp)
+                    if temp.exists() and not old.exists():
+                        temp.rename(old)
+                raise
+            for output,old,dest,fields in planned:
+                output.setdefault('corrections',[]).append({'revision':revision,'at':time.time(),**fields})
+                output['human_metadata']={**output.get('human_metadata',{}),**fields}
+                if old is not None and dest is not None and dest != old:
+                    output['media_relative_path']=str(dest.relative_to(self.s.media))
+                    output['destination']=str(dest)
+                    output['arm_output_path']=str(dest)
+                    output['host_path']=str(Path(getattr(self.s,'media_host_prefix',''))/output['media_relative_path']) if getattr(self.s,'media_host_prefix','') else str(dest)
+                if fields.get('episode_number') is not None or fields.get('episode_range'):
+                    output['episode']={'number':int(fields.get('episode_number') or fields['episode_range'].split('-')[0]),
+                                       'end':int(fields['episode_range'].split('-')[-1]) if fields.get('episode_range') else None,
+                                       'title':fields.get('episode_name')}
+            latest_identity=review.get('identity_fields') or {}
+            if identity_correction.get('series'):
+                latest_identity['series_display']=str(identity_correction['series']).strip()
+            if identity_correction.get('season') is not None:
+                latest_identity['season']=int(identity_correction['season'])
+            for fields in corrections.values():
+                if fields.get('series'):
+                    latest_identity['series_display']=fields['series']
+                if fields.get('season') is not None:
+                    latest_identity['season']=int(fields['season'])
+            review['identity_fields']=latest_identity
+            review['review_history'].append({
+                'revision':revision,'at':time.time(),'action':action,
+                'reviewed_fields':sorted(set(reviewed_fields)),
+                'identity_corrections':identity_correction,
+                'corrections':corrections,'renames':changes,'notes':str(request.get('notes') or '')[:2000],
+            })
+            review['feedback']={'reviewed_fields':sorted(set(reviewed_fields)),
+                                'corrections':review['review_history'][-1]['corrections'],
+                                'assessment':action,'notes':str(request.get('notes') or '')[:2000]}
+            review['status']={'accept':'accepted','save_reviewed':'reviewed','needs_attention':'needs_attention'}[action]
+            review['updated_at']=time.time()
+            payload['local_review']=review
+            self.db.execute('UPDATE reservations SET body=?,state=?,publication=?,error=? WHERE job=?',
+                            (encode(payload),review['status'],review['status'],'' if action!='needs_attention' else 'Operator requested attention',job))
+            publish_json(self.s.state/'reviews'/f'{job}.json',review)
+            return review
 
     def read_ack(self,row):
         if not self.s.fileflows_enabled:
@@ -1297,6 +1656,8 @@ class Controller:
             r['recognition']=body.get('recognition')
             r['arm_start_acknowledged']=bool(body.get('start_request_acknowledged_at'))
             r['naming_preview']=body.get('naming_preview')
+            r['workflow']=body.get('workflow')
+            r['local_review']=body.get('local_review')
             manifest_path=((self.s.handover/'ready') if self.s.fileflows_enabled else
                            (self.s.state/'finished'))/f"{r['job']}.json"
             if manifest_path.is_file():
@@ -1312,9 +1673,11 @@ class Controller:
         for b in batches:
             b['master']=json.loads(b['master'])
         storage = {}
-        for name, path, writable in (('state', self.s.state, True),
-                                     ('queue_media', self.s.media, False),
-                                     ('handover', self.s.handover, self.s.fileflows_enabled)):
+        paths=[('state', self.s.state, True),('queue_media', self.s.media, False),
+               ('handover', self.s.handover, self.s.fileflows_enabled)]
+        if getattr(self.s,'local_beta',False):
+            paths.append(('beta_output',Path(self.s.beta_output_root),True))
+        for name, path, writable in paths:
             try:
                 stat = path.stat()
                 fs = os.statvfs(path)
@@ -1330,7 +1693,8 @@ class Controller:
                 'reservations':reservations,'skipped':self.db.rows('SELECT * FROM skipped'),
                 'preflight':self.db.get('preflight'),
                 'agreement_preflight':self.db.get('agreement_preflight'),
-                 'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled,
+                'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled,
                 'dry_run_only':self.s.dry_run_only,
+                'local_beta_enabled':getattr(self.s,'local_beta',False),
                  'dry_run':self.db.get('active_dry_run'),
                  'dry_run_history':self.db.get('dry_run_history',[])}

@@ -5,12 +5,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 568 queue && useradd --uid 568 --gid 568 --no-create-home queue
 WORKDIR /app
+ARG SOURCE_COMMIT=unknown
+ARG IMAGE_VERSION=local
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 COPY scripts ./scripts
 COPY examples ./examples
+COPY tools ./tools
+LABEL org.opencontainers.image.source="https://github.com/TammuzGreeen/ARM-ripper-vision" \
+      org.opencontainers.image.revision="${SOURCE_COMMIT}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}"
 USER 568:568
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3)"

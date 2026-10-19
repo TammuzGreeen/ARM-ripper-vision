@@ -132,6 +132,19 @@ calling either model or touching the drive. Original model transcriptions,
 stream files, capture and scan remain the evidence; normalized fields and each
 matching decision are shown separately.
 
+## Local operational beta
+
+For the opt-in local beta workflow, see [local-beta.md](docs/local-beta.md).
+It uses ARM's own prescan and rip lifecycle, supports provisional source-title
+outputs when no compatible technical masterlist mapping exists, and leaves
+validated outputs in local storage for authenticated human review. Configure
+`LOCAL_BETA_ENABLED=true`, `DRY_RUN_ONLY=false`, and
+`FILEFLOWS_ENABLED=false` together; the app rejects an inconsistent beta
+configuration. Unmapped sources are not assigned episode numbers. The normal
+source policy is every technically selectable prescanned title, with exclusions
+recorded only when a compatible approved mapping explicitly selects a subset.
+This mode is a small-batch beta, not a claim of physical qualification.
+
 Example host invocation (adjust local paths/container names; never store the
 report, config, keys or capture in Git):
 
