@@ -29,6 +29,10 @@ class LocalBetaTests(unittest.TestCase):
         self.assertFalse(Controller.local_beta_capture_usable({'camera':'/dev/video0','frames':[]}))
         self.assertFalse(Controller.local_beta_capture_usable({'camera':'/dev/video0','test_only':True,
                                                                 'frames':[{'evidence':'event/0.jpg'}]}))
+        self.assertTrue(Controller.local_beta_capture_usable({'camera':'/dev/video0','backend':'ollama-agreement',
+            'capture_source':'webcam','frames':[],'reason':'camera frame could not be retained'}))
+        self.assertFalse(Controller.local_beta_capture_usable({'camera':'/dev/video0','backend':'ollama-agreement',
+            'capture_source':'vision_test','test_only':True,'frames':[],'reason':'no image'}))
 
     def test_provisional_arm_configuration_selects_every_scanned_source(self):
         arm=ARM.__new__(ARM)

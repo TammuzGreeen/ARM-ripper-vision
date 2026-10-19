@@ -443,7 +443,8 @@ class Camera:
                 self.status['message'] = result['reason']
         except Exception as exc:
             reason = str(exc) if isinstance(exc, VisionError) else 'Image recognition failed; check service configuration and try again'
-            failure = {'accepted':False, 'test_only':test_only or vision,
+            failure = {'accepted':False, 'test_only':test_only,
+                       'capture_source':source,'camera':self.s.camera if source=='webcam' else None,
                        'frames':results, 'reason':reason, 'backend':self.s.recognition_backend}
             if capture_quality:
                 failure['capture_quality']=capture_quality

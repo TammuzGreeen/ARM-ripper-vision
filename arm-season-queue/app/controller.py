@@ -563,7 +563,14 @@ class Controller:
             return False
         # A frame-backed capture can still be scanned when a model is unavailable,
         # partial, or contradictory. The full evidence is retained for review.
-        return bool(result.get('frames'))
+        if result.get('frames'):
+            return True
+        # A fresh webcam event whose capture/recognition failed can still be
+        # associated with this insertion and produce source-title provisional
+        # outputs. The empty evidence is explicit; never substitute another
+        # event's photograph. Image-only test events remain ineligible.
+        return bool(result.get('capture_source') == 'webcam' and result.get('camera')
+                    and result.get('reason'))
 
     @staticmethod
     def human_retry_authorized(recognition):
