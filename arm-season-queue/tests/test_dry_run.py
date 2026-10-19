@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from app.dry_run import build_plan, parse_info
 from app.formats import Disc, Episode, Inventory, Masterlist, TitleMap, digest
@@ -272,6 +273,71 @@ class DryRunTests(unittest.TestCase):
                      [held,{'job_id':8,'status':'manual_paused','manual_start':False}], []):
             with self.assertRaises(RuntimeError):
                 dry_scan.held_current_job(drive,jobs,'/dev/sr0')
+
+    def test_scanner_handoff_waits_for_arm_prescan_and_stable_worker_free_pause(self):
+        clock=SimpleNamespace(now=0.0)
+        def monotonic():
+            return clock.now
+        def sleep(seconds):
+            clock.now += seconds
+        held={'drive':{'mount':'/dev/sr0'},'job':{'job_id':9,'status':'manual_paused','manual_start':False},
+              'other_active':[]}
+        prescanning={'drive':{'mount':'/dev/sr0'},'job':{'job_id':9,'status':'identifying','manual_start':False},
+                     'other_active':[]}
+        def arm_state(*_):
+            return prescanning if clock.now < 1 else held
+        def workers():
+            return [(123,'makemkvcon info')] if clock.now < 2 else []
+        with patch.object(dry_scan.time,'monotonic',side_effect=monotonic), \
+             patch.object(dry_scan.time,'sleep',side_effect=sleep), \
+             patch.object(dry_scan,'arm_handoff_snapshot',side_effect=arm_state), \
+             patch.object(dry_scan,'makemkv_processes',side_effect=workers):
+            result=dry_scan.wait_for_arm_handoff('api','/dev/sr0',10,settle_seconds=2,poll_seconds=1)
+        self.assertEqual(result['held_job']['job_id'],9)
+        self.assertGreaterEqual(clock.now,4)
+
+    def test_scanner_handoff_does_not_accept_stale_job_for_new_insertion(self):
+        clock=SimpleNamespace(now=0.0)
+        held={'drive':{'mount':'/dev/sr0'},'job':{'job_id':7,'status':'manual_paused','manual_start':False},
+              'other_active':[]}
+        with patch.object(dry_scan.time,'monotonic',side_effect=lambda:clock.now), \
+             patch.object(dry_scan.time,'sleep',side_effect=lambda seconds:setattr(clock,'now',clock.now+seconds)), \
+             patch.object(dry_scan,'arm_handoff_snapshot',return_value=held), \
+             patch.object(dry_scan,'makemkv_processes',return_value=[]):
+            with self.assertRaisesRegex(RuntimeError,'stable manual-paused'):
+                dry_scan.wait_for_arm_handoff('api','/dev/sr0',2,previous_job_id=7,
+                                               require_new_job=True,settle_seconds=1,poll_seconds=1)
+
+    def test_historical_completed_dry_run_can_receive_user_assessment(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.state import Store
+        with TemporaryDirectory() as temp:
+            c=Controller.__new__(Controller);c.lock=threading.RLock();c.db=Store(Path(temp)/'queue.sqlite3')
+            old={'id':'second-run','status':'superseded','superseded_reason':'next dry run',
+                 'scan':{'summary':{}},'plan':{'blockers':['unresolved mapping'],'ready_for_ripping':False}}
+            active={'id':'next-run','status':'review','scan':None,'plan':None}
+            c.db.put('dry_run_history',[old]);c.db.put('active_dry_run',active)
+            result=c.assess_dry_run('second-run','test_successful','User confirmed successful and correct.')
+            self.assertEqual(result['assessment']['outcome'],'test_successful')
+            self.assertEqual(result['status'],'assessed')
+            self.assertFalse(result['plan']['ready_for_ripping'])
+            self.assertEqual(c.db.get('active_dry_run')['id'],'next-run')
+            with self.assertRaisesRegex(ValueError,'already has a final assessment'):
+                c.assess_dry_run('second-run','needs_changes')
+
+    def test_only_terminal_camera_timeout_allows_unscanned_run_to_be_superseded(self):
+        timed_out={'status':'review','scan':None,'plan':None,
+                   'recognition':{'result':{'accepted':False,'reason':
+                       'No stable, sharp camera capture within 60 seconds; review or continue with drive scan'}}}
+        self.assertTrue(Controller.terminal_dry_run_capture_failure(timed_out))
+        for other in (
+            {**timed_out,'recognition':{'result':{'accepted':False,'reason':'Models disagreed'}}},
+            {**timed_out,'recognition':{'result':{'accepted':True,'reason':'recognized'}}},
+            {**timed_out,'scan':{'summary':{}}},
+            {**timed_out,'status':'recognizing'},
+        ):
+            self.assertFalse(Controller.terminal_dry_run_capture_failure(other))
 
     def test_workflow_assessment_does_not_clear_plan_blockers_or_rip_readiness(self):
         from tempfile import TemporaryDirectory

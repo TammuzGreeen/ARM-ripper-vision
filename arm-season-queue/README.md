@@ -97,17 +97,22 @@ or descriptive-only drafts continue to scan and provisional planning. Human
 identity corrections and per-title assignments are authoritative for this job
 only and never change reusable masterlists. Attach a report made by the host-side
 `scripts/dry_run_info_scan.py` helper. That helper verifies ARM's global pause,
-empty job state, and persistent MakeMKV `+sel:all` stream policy, closes the
-selected tray by a kernel ioctl, waits a bounded
-time for media readiness, and runs only `makemkvcon -r info` with a 600-second
-default hard timeout in a networkless,
+safe drive/job state, and persistent MakeMKV `+sel:all` stream policy; it closes
+the selected tray by a kernel ioctl and waits for media readiness. Tray closure
+may asynchronously launch ARM's own prescan, so the helper waits (up to 1200
+seconds by default) for ARM to reach `manual_paused` with no start request and
+remain scanner-free for five seconds before launching its own scanner. A stale
+job from before the new insertion is not accepted as the handoff. It then runs
+only `makemkvcon -r info` with a 600-second default hard timeout in a networkless,
 read-only scanner container. It never calls ARM's `/drives/{id}/scan` endpoint:
 the inspected ARM implementation launches processing from that route (and its
 tray-close API also invokes the processing wrapper). Give the helper a private
 report directory and the persistent MakeMKV configuration mounted read-only.
 The private report is stamped with the fresh camera event UUID; the helper
 monitors drive media-change state, ARM pause/job state and ARM worker processes,
-and aborts on replacement or concurrent ARM processing.
+and aborts on replacement or concurrent ARM processing. A bounded camera-capture
+timeout may be superseded by an explicitly requested fresh dry run; the failed
+attempt remains in history without being assessed.
 
 The GUI reconciles actual MakeMKV title IDs, DVD titles/angles where reported,
 durations, chapters, sizes, per-title streams and the ordinary ARM planning

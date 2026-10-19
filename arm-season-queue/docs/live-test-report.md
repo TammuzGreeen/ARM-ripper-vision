@@ -1,5 +1,28 @@
 # Verification and qualification
 
+## Scanner handoff race guard and historical dry-run assessment (2026-10-11)
+
+The host-side info scanner now treats ARM's tray-close-triggered prescan as a
+handoff phase: it waits for the current inserted-disc job to become
+`manual_paused` with `manual_start=false`, verifies that no other active job or
+MakeMKV info process exists, and requires that state to remain stable for five
+seconds before launching its isolated info-only scan. When tray closure is
+needed, an already-existing job ID cannot satisfy the new-insertion handoff.
+The wait is bounded at 1200 seconds by default. Regression tests exercise the
+prescan transition, scanner activity, stable hold, and stale-job rejection.
+
+An already-retained, fully scanned dry run can now receive its operator
+assessment after it has moved into dry-run history; the active run is not
+replaced or changed. An unscanned run may be superseded without assessment only
+after the bounded camera capture has explicitly timed out. Other incomplete
+reviews remain blocked from starting another run.
+
+These are source-level and local-suite checks only. The updated helper's
+race-free behavior has not yet been qualified against a physical ARM prescan;
+the next supervised run must verify that ARM reaches its held state before the
+host scanner starts. A software `Test successful` assessment does not imply a
+physical scan, rip, or FileFlows qualification.
+
 ## Field-level model evidence and retained DS9 dry run (2026-10-11)
 
 The old blanket agreement rule is replaced by per-field evidence combination.

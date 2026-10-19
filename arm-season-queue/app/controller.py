@@ -189,10 +189,13 @@ class Controller:
             if current:
                 if current.get('status') not in ('assessed','abandoned','superseded'):
                     if not current.get('scan') or not current.get('plan'):
-                        raise ValueError('Complete the current capture and information-only scan before starting the next disc')
+                        if not self.terminal_dry_run_capture_failure(current):
+                            raise ValueError('Complete the current capture and information-only scan before starting the next disc')
+                        current['superseded_reason']='Next dry run started after terminal camera capture failure; no assessment or scan was implied'
+                    else:
+                        current['superseded_reason']='Next unrestricted disc dry run started; no assessment was implied'
                     current['status']='superseded'
                     current['superseded_at']=time.time()
-                    current['superseded_reason']='Next unrestricted disc dry run started; no assessment was implied'
                 history=self.db.get('dry_run_history',[])
                 if not any(row.get('id')==current.get('id') for row in history):
                     history.append(current)
@@ -229,6 +232,16 @@ class Controller:
                    'assessment':None, 'recognition':None, 'correction':None, 'scan':None, 'plan':None}
             self.db.put('active_dry_run', run)
             return run
+
+    @staticmethod
+    def terminal_dry_run_capture_failure(run):
+        """Allow a new run after only a bounded camera-capture timeout, not a skipped review/scan."""
+        recognition=run.get('recognition') or {}
+        result=recognition.get('result') or {}
+        reason=result.get('reason') or ''
+        return (run.get('status')=='review' and not run.get('scan') and not run.get('plan')
+                and result.get('accepted') is False
+                and reason.startswith('No stable, sharp camera capture within '))
 
     def save_dry_run_correction(self, run_id, correction):
         allowed = {'series','season','disc_number','episodes','titles','edition','notes',
@@ -494,12 +507,29 @@ class Controller:
         if outcome not in ('test_successful','needs_changes'):
             raise ValueError('Assessment must be Test successful or Needs changes')
         with self.lock:
-            run = self._dry_run(run_id)
+            current = self.db.get('active_dry_run')
+            history = self.db.get('dry_run_history', [])
+            historical_index = next((i for i, row in enumerate(history)
+                                     if row.get('id') == run_id), None)
+            if current and current.get('id') == run_id:
+                run = current
+                historical = False
+            elif historical_index is not None:
+                run = history[historical_index]
+                historical = True
+            else:
+                raise ValueError('Dry-run record not found')
             if not run.get('scan') or not run.get('plan'):
                 raise ValueError('Final review requires capture, recognition outcome, scan and proposed plan')
+            if run.get('assessment'):
+                raise ValueError('Dry-run record already has a final assessment')
             run['assessment'] = {'outcome':outcome,'notes':str(notes)[:2000],'assessed_at':time.time()}
             run['status'] = 'assessed'
-            self.db.put('active_dry_run', run)
+            if historical:
+                history[historical_index] = run
+                self.db.put('dry_run_history', history)
+            else:
+                self.db.put('active_dry_run', run)
             return run
 
     def agreement_authorized(self, result):

@@ -77,6 +77,85 @@ def check_arm(base, device):
     return {'drive':selected[0], 'held_job':held}
 
 
+def arm_handoff_snapshot(base, device):
+    """Read ARM's post-insertion state without treating prescan transitions as safe."""
+    pause = api_json(base, '/system/ripping-enabled')
+    if pause.get('ripping_enabled') is not False:
+        raise RuntimeError('ARM global pause is not verified; scan refused')
+    jobs_data = api_json(base, '/jobs/paginated?page=1&per_page=100')
+    drive_data = api_json(base, '/drives')
+    jobs = jobs_data.get('jobs', [])
+    if jobs_data.get('total', len(jobs)) != len(jobs):
+        raise RuntimeError('ARM job listing is incomplete; refusing drive scan')
+    selected = [d for d in drive_data.get('drives', []) if d.get('mount') == device]
+    if len(selected) != 1:
+        raise RuntimeError('Configured ARM drive is missing or ambiguous')
+    drive = selected[0]
+    if drive.get('drive_mode') != 'auto':
+        raise RuntimeError('ARM drive is not in the inspected automatic mode')
+    current = drive.get('job_id_current')
+    active = [job for job in jobs if job.get('status') not in TERMINAL_ARM_STATUSES]
+    if current is None:
+        if active:
+            raise RuntimeError('ARM has active jobs without a current drive association; info scan refused')
+        return {'drive':drive, 'job':None, 'other_active':[]}
+    rows = [job for job in jobs if job.get('job_id') == current]
+    if len(rows) != 1:
+        raise RuntimeError('ARM current drive job is missing or ambiguous in the job listing')
+    job = rows[0]
+    other_active = [other for other in active if other is not job]
+    if other_active:
+        raise RuntimeError('ARM has another active job; info scan refused')
+    if job.get('manual_start') is True:
+        raise RuntimeError('ARM job has a manual-start request; info scan refused')
+    if job.get('status') not in ('manual_paused', 'identifying', 'ready'):
+        raise RuntimeError('ARM drive job is not in an expected prescan/held state')
+    return {'drive':drive, 'job':job, 'other_active':other_active}
+
+
+def wait_for_arm_handoff(base, device, timeout, previous_job_id=None,
+                         require_new_job=False, settle_seconds=5, poll_seconds=1):
+    """Wait for ARM's auto-prescan to finish before admitting our scanner.
+
+    Closing the tray can start ARM's own MakeMKV worker asynchronously. A single
+    immediate API/process check races that startup; require ARM to expose a held
+    manual_paused job and remain scanner-free for a settling interval instead.
+    """
+    deadline = time.monotonic() + timeout
+    stable_since = None
+    stable_job_id = None
+    while time.monotonic() < deadline:
+        state = arm_handoff_snapshot(base, device)
+        job = state['job']
+        scanners = makemkv_processes()
+        candidate = (job is not None and job.get('status') == 'manual_paused'
+                     and job.get('manual_start') is False and not state['other_active']
+                     and (not require_new_job or job.get('job_id') != previous_job_id)
+                     and not scanners)
+        now = time.monotonic()
+        job_id = job.get('job_id') if job else None
+        if candidate:
+            if stable_since is None or stable_job_id != job_id:
+                stable_since = now
+                stable_job_id = job_id
+            elif now - stable_since >= settle_seconds:
+                # Final fresh checks close the remaining observation gap before
+                # the host helper launches its isolated MakeMKV info process.
+                final = arm_handoff_snapshot(base, device)
+                if (final['job'] and final['job'].get('job_id') == job_id
+                        and final['job'].get('status') == 'manual_paused'
+                        and final['job'].get('manual_start') is False
+                        and not final['other_active'] and not makemkv_processes()):
+                    return {'drive':final['drive'], 'held_job':final['job']}
+                stable_since = None
+                stable_job_id = None
+        else:
+            stable_since = None
+            stable_job_id = None
+        time.sleep(min(poll_seconds, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f'ARM did not reach a stable manual-paused, scanner-free handoff within {timeout} seconds')
+
+
 def makemkv_processes():
     """Find host-visible MakeMKV scanner processes, including container PIDs."""
     found=[]
@@ -212,6 +291,8 @@ def main():
     p.add_argument('--makemkv-config', type=Path, required=True, help='Persistent MakeMKV config directory, mounted read-only')
     p.add_argument('--report-dir', type=Path, required=True, help='Private local directory outside Git')
     p.add_argument('--timeout', type=int, default=120)
+    p.add_argument('--arm-handoff-timeout', type=int, default=1200,
+                   help='Maximum seconds to wait for ARM prescan and a stable held-job handoff')
     p.add_argument('--scan-timeout', type=int, default=600)
     p.add_argument('--confirm-physical-disc', action='store_true', help='Confirm the camera-reviewed intended disc is on the open tray')
     p.add_argument('--capture-event', required=True, help='Exact fresh camera event UUID shown by the dry-run review screen')
@@ -222,8 +303,9 @@ def main():
         capture_event = str(UUID(a.capture_event))
     except ValueError:
         p.error('--capture-event must be the UUID of the current dry-run camera capture')
-    if not (1 <= a.timeout <= 600 and 1 <= a.scan_timeout <= 1800):
-        p.error('readiness timeout must be 1–600 seconds and info-scan timeout 1–1800 seconds')
+    if not (1 <= a.timeout <= 600 and 1 <= a.arm_handoff_timeout <= 1800
+            and 1 <= a.scan_timeout <= 1800):
+        p.error('readiness timeout must be 1–600, ARM handoff 1–1800, and info-scan timeout 1–1800 seconds')
     if not (a.device.startswith('/dev/sr') and a.sg_device.startswith('/dev/sg')):
         p.error('only explicit /dev/srN and /dev/sgN optical nodes are accepted')
     if (not Path(a.device).is_block_device() or not Path(a.sg_device).is_char_device()
@@ -240,15 +322,18 @@ def main():
         scan_lock=acquire_scan_lock()
         arm_state = check_arm(a.arm_api, a.device)
         require_all_stream_profile(a.makemkv_config)
-        if drive_ioctl(a.device, DRIVE_STATUS) == 2:
+        tray_open = drive_ioctl(a.device, DRIVE_STATUS) == 2
+        previous_job_id = arm_state['drive'].get('job_id_current')
+        if tray_open:
             drive_ioctl(a.device, CLOSE_TRAY)
         wait_ready(a.device, a.timeout)
         clear_media_change(a.device)
-        # The ARM source profile confirms its /drives/{id}/scan route launches
-        # processing. Never call it; stop if its local worker started anyway.
-        arm_state = check_arm(a.arm_api, a.device)
-        if makemkv_processes():
-            raise RuntimeError('A MakeMKV scanner appeared after ARM safety check; refusing competing scan')
+        # Tray closure itself may asynchronously start ARM's own prescan. Do not
+        # launch the helper until that handoff is stable and ARM is held.
+        arm_state = wait_for_arm_handoff(
+            a.arm_api, a.device, a.arm_handoff_timeout,
+            previous_job_id=previous_job_id,
+            require_new_job=tray_open or arm_state['held_job'] is None)
         cmd = ['docker','run','--rm','--network','none','--read-only',
                '--tmpfs','/tmp:rw,nosuid,nodev,size=512m','--user','0:24','--cap-drop','ALL',
                '--env','HOME=/root','--device',f'{a.device}:/dev/sr0:rw',
