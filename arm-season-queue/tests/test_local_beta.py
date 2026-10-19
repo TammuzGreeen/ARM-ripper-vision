@@ -81,6 +81,9 @@ class LocalBetaTests(unittest.TestCase):
             self.assertEqual(payload['excluded_titles'],[])
             self.assertTrue(all(x['provisional'] for x in payload['mapping']))
             self.assertTrue(all('PROVISIONAL' in x['basename'] for x in payload['mapping']))
+            output_dir=media/'unreviewed'/'arm-season-queue'/'job-8'
+            self.assertTrue(output_dir.is_dir())
+            self.assertEqual(output_dir.stat().st_mode & 0o777,0o770)
 
     def _controller(self, root, outputs):
         c=Controller.__new__(Controller)

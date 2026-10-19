@@ -1272,9 +1272,21 @@ class Controller:
             'mapping_source': mapping_source, 'identity_fields': identity,
             'warnings': list(dict.fromkeys(warnings)),
         }
+        # Precreate ARM's exact per-job output directory under the queue's
+        # shared group. ARM runs as UID 1000 while review runs as UID 568;
+        # setgid + group-write is required so safe post-rip renames work.
+        output_directory=output_root/'arm-season-queue'/f'job-{job}'
+        if output_directory.exists():
+            raise ValueError(f'Job output directory already exists; refusing reuse: {output_directory}')
+        output_directory.mkdir(mode=0o2770,parents=True,exist_ok=False)
+        output_directory.chmod(0o2770)
+        if output_directory.stat().st_gid not in {os.getgid(),*os.getgroups()}:
+            output_directory.rmdir()
+            raise ValueError('ARM output directory did not inherit a queue-accessible group')
         try:
             self.db.claim(job, batch['id'], disc_id, event['id'], payload)
         except Exception as exc:
+            output_directory.rmdir()
             raise ValueError('Insertion was already reserved or could not be claimed: ' + str(exc)) from exc
 
     def advance(self, row, running, current):
