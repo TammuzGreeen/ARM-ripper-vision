@@ -16,6 +16,7 @@ from .controller import Controller
 from .formats import Masterlist
 from .handover import beneath
 from .vision import VisionError
+from .state import encode
 
 
 def create_app(settings=None, start_workers=True):
@@ -23,7 +24,9 @@ def create_app(settings=None, start_workers=True):
     if not settings.password:
         raise ValueError('Set a nonempty QUEUE_PASSWORD before starting the service')
     controller = Controller(settings)
-    camera = Camera(settings,controller.begin_event,controller.recognition_done,controller.release_event,controller.masters)
+    camera = Camera(settings,controller.begin_event,controller.recognition_done,controller.release_event,
+                    controller.masters,controller.close_tray_after_snapshot)
+    controller.on_tray_open=camera.tray_opened
 
     @asynccontextmanager
     async def lifespan(app):
@@ -87,13 +90,52 @@ def create_app(settings=None, start_workers=True):
 
     @app.get('/static/{filename}')
     def static(filename:str):
-        if filename not in ('app.js','style.css','dry-run.js','beta-review.js'):
+        if filename not in ('app.js','style.css','dry-run.js','beta-review.js','recognition-log.js','context.js'):
             raise HTTPException(404)
         return FileResponse(Path(__file__).parent.parent/'static'/filename)
 
     @app.get('/api/state')
     def state():
         return dict(controller.snapshot(),camera=camera.snapshot())
+
+    @app.get('/api/events')
+    def recognition_events(offset:int=0,limit:int=20):
+        if offset<0 or not 1<=limit<=100:
+            raise HTTPException(400,'offset must be nonnegative and limit must be 1..100')
+        rows=controller.db.rows('SELECT * FROM events ORDER BY created DESC')
+        rows=[row for row in rows if not str(json.loads(row['body']).get('source','')).startswith('dry_run_')]
+        page=rows[offset:offset+limit]
+        for row in page:row['body']=json.loads(row['body'])
+        return {'items':page,'offset':offset,'limit':limit,'total':len(rows),'has_more':offset+len(page)<len(rows)}
+
+    @app.get('/api/events/{event_id}/evidence')
+    def recognition_evidence(event_id:str):
+        rows=controller.db.rows('SELECT 1 FROM events WHERE id=?',(event_id,))
+        if len(rows)!=1:raise HTTPException(404,'Recognition event not found')
+        directory=settings.state/'evidence'/event_id
+        items=[]
+        if directory.is_dir():
+            for path in sorted(directory.iterdir()):
+                if path.is_file() and path.suffix.lower() in ('.jpg','.jpeg','.png','.webp'):
+                    items.append({'name':path.name,'bytes':path.stat().st_size})
+        return {'items':items}
+
+    @app.post('/api/events/{event_id}/assessment')
+    async def event_assessment(event_id:str,request:Request):
+        body=json.loads(await limited(request))
+        outcome=body.get('outcome');note=str(body.get('note') or '')[:1000]
+        if outcome not in ('correct','incorrect'):
+            raise HTTPException(400,'outcome must be correct or incorrect')
+        rows=controller.db.rows('SELECT body,status,created FROM events WHERE id=?',(event_id,))
+        if len(rows)!=1:
+            raise HTTPException(404,'Recognition event not found')
+        record=json.loads(rows[0]['body']);history=record.setdefault('diagnostic_assessments',[])
+        prior=history[-1] if history else {}
+        history.append({'revision':len(history)+1,'outcome':outcome,'note':note,
+                        'assessed_result':__import__('hashlib').sha256(json.dumps(record.get('result'),sort_keys=True,ensure_ascii=False).encode()).hexdigest(),
+                        'supersedes':prior.get('revision'),'assessed_at':__import__('time').time()})
+        controller.db.execute('UPDATE events SET body=? WHERE id=?',(encode(record),event_id))
+        return {'event':event_id,'assessment':history[-1]}
 
     @app.get('/api/rejected-rips')
     def rejected_rips(status: str = 'pending'):
@@ -139,7 +181,8 @@ def create_app(settings=None, start_workers=True):
     @app.post('/api/batch')
     async def batch(request:Request):
         body = json.loads(await limited(request))
-        return {'batch':await asyncio.to_thread(controller.activate,body.get('master'))}
+        return {'batch':await asyncio.to_thread(controller.activate,body.get('master'),
+                                                 body.get('start_disc'),body.get('start_entry'))}
 
     @app.post('/api/dry-run')
     async def dry_run(request:Request):
@@ -184,7 +227,14 @@ def create_app(settings=None, start_workers=True):
             raise HTTPException(400,'Unknown review filter')
         rows=[r for r in controller.snapshot()['reservations'] if r.get('workflow')=='local-beta-v1']
         if status!='all':
-            rows=[r for r in rows if r.get('state')==status or (status=='failed' and r.get('state') in ('failed','review'))]
+            # ``review`` is the durable recovery state for a completed rip whose
+            # post-rip task (for example tray handling) failed. If local review
+            # data was already written, that failure must not hide its files
+            # from the human-review queue.
+            rows=[r for r in rows if r.get('state')==status
+                  or (status=='awaiting_review' and r.get('state')=='review'
+                      and r.get('local_review') is not None)
+                  or (status=='failed' and r.get('state') in ('failed','review'))]
         return {'items':rows}
 
     @app.post('/api/local-beta/jobs/{job}/review')

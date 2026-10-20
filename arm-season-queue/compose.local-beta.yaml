@@ -1,0 +1,34 @@
+# Durable overlay for the qualified local ARM-beta deployment. Supply private
+# connection, device, path, and credential values through an external env file.
+services:
+  queue:
+    image: ${QUEUE_RELEASE_IMAGE:?Set an immutable source-identifiable image tag}
+    build:
+      context: .
+      args:
+        SOURCE_COMMIT: ${QUEUE_RELEASE_COMMIT:?Set the source commit}
+        IMAGE_VERSION: ${QUEUE_RELEASE_IMAGE:?Set the image tag}
+    group_add:
+      - "${ARM_GID:?Set ARM's media group ID for post-rip review renames}"
+    environment:
+      DRY_RUN_ONLY: "false"
+      LOCAL_BETA_ENABLED: "true"
+      LOCAL_BETA_TRAY_CYCLE_ENABLED: "false"
+      LOCAL_BETA_TRAY_CLOSE_ENABLED: "false"
+      FILEFLOWS_ENABLED: "false"
+      APP_VERSION: ${QUEUE_RELEASE_IMAGE:?Set the image tag}
+      MEDIA_HOST_PREFIX: ${MEDIA_HOST_PREFIX:?Set the host path corresponding to /media}
+      CAPTURE_TTL_SECONDS: "1800"
+      PRESENTATION_CAPTURE_TIMEOUT_SECONDS: "90"
+    volumes:
+      - ${ARM_MEDIA_HOST:?Set the existing ARM media mount}:/media:rw
+
+  arm-rippers:
+    image: ${ARM_RELEASE_IMAGE:?Set a source-identifiable ARM image tag}
+    build:
+      context: ./arm-overlay
+      args:
+        SOURCE_COMMIT: ${QUEUE_RELEASE_COMMIT:?Set the source commit}
+        IMAGE_VERSION: ${ARM_RELEASE_IMAGE:?Set the ARM image tag}
+    group_add:
+      - "${QUEUE_GID:?Set the queue service group ID for rename access}"

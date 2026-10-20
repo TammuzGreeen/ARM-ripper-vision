@@ -28,6 +28,24 @@ reservation before it configures or starts a job.
   inventory exists, the report explicitly says inventory is unknown rather than
   claiming it matched.
 
+## ARM-owned tray cycle
+
+With `LOCAL_BETA_TRAY_CYCLE_ENABLED=true`, batch start/resume opens the configured
+ARM tray only when ARM reports no current job and the global pause is held. The
+camera persists the original snapshot first; only then does the companion use
+ARM's explicit `close` API method, which starts ARM's drive rescan. Recognition
+continues from the retained image while ARM scans. After terminal success (and
+local validation) or terminal ARM failure, the companion rechecks the exact
+job/drive association and asks ARM to open the tray. `toggle` is never used.
+Tray action intent/result is persisted and visible in the GUI. A failed or
+ambiguous API outcome is not blindly retried.
+
+The first tray-cycle setup requires an empty open-tray camera view calibration.
+The physical camera framing and hand-clear timing must be checked on the first
+disc; software cannot prove that a hand has left the tray from the snapshot
+alone. Do not place a hand in the mechanism when automatic close is enabled.
+The installed ARM API is the only code that controls the optical tray.
+
 ## Review and feedback
 
 The authenticated GUI has a local review list. **Accept**, **Save corrections

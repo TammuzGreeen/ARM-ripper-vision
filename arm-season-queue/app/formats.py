@@ -200,26 +200,56 @@ def destination(master, ep):
 
 
 def output_destination(master, disc, mapped):
-    title = safe_name(master.series)
-    edition = safe_name(master.edition_name or master.edition or 'Unspecified edition')
-    version = f' - {safe_name(mapped.version)}' if mapped.version else ''
+    # ARM's filename sanitizer is mirrored here because the companion owns
+    # the planned name and sends it as custom_filename. Edition identity is
+    # retained in the review/manifest; repeating its full marketing string in
+    # every filename is noisy and can exceed consumer path limits.
+    title = arm_name(master.series)
+    version = f' - {arm_name(mapped.version)}' if mapped.version else ''
     if mapped.episode_index is not None:
         episode = disc.episodes[mapped.episode_index]
         if episode.title is None:
             label = f'Episode {episode.number}'
         else:
-            label = safe_name(episode.title)
+            label = arm_name(episode.title)
         code = f'S{master.season:02d}E{episode.number:02d}'
         if episode.end is not None:
             code += f'-E{episode.end:02d}'
         if episode.part:
             code += f' - part{episode.part}'
-        filename = safe_name(f'{title} {code} - {label}{version} - {edition}') + '.mkv'
+        filename = arm_name(f'{title} {code} - {label}{version}') + '.mkv'
         return str(PurePosixPath('tv', title, f'Season {master.season:02d}', filename))
     extra = next(value for value in disc.extras if value.id == mapped.extra_id)
-    label = safe_name(mapped.output_name or extra.title or extra.id)
-    filename = safe_name(f'{title} S{master.season:02d}D{disc.number:02d} EXTRA - {label}{version} - {edition}') + '.mkv'
-    return str(PurePosixPath('tv', title, f'Season {master.season:02d}', 'Extras', filename))
+    label = arm_name(mapped.output_name or extra.title or extra.id)
+    filename = arm_name(f'{title} S{master.season:02d}D{disc.number:02d} EXTRA - {label}{version}') + '.mkv'
+    # ARM exposes one rendered folder per track but the inspected API does
+    # not support per-track directories; the explicit EXTRA token preserves
+    # classification in the normal season directory.
+    return str(PurePosixPath('tv', title, f'Season {master.season:02d}', filename))
+
+
+def arm_name(text):
+    """Mirror ARM Neu 19.1's clean_for_filename for planned names."""
+    text = str(text).replace(':', ' - ').replace('\\', ' - ')
+    text = re.sub(r'\s+', ' ', text).replace('&', 'and')
+    text = re.sub(r'[^\w .()\[\]-]', '', text)
+    text = re.sub(r'\.{2,}', '.', text).strip('. ')
+    if not text or len(text.encode('utf-8')) > 180:
+        raise ValueError('ARM filename component is empty or too long')
+    return text
+
+
+def arm_output_path(job_path, rendered_folder, rendered_title, extension='.mkv'):
+    """Mirror the supported ARM finalizer's de-duplicated folder join."""
+    base=PurePosixPath(job_path)
+    folder=PurePosixPath(rendered_folder) if rendered_folder else PurePosixPath()
+    base_parts=base.parts
+    folder_parts=folder.parts
+    if folder_parts and len(base_parts)>=len(folder_parts) and base_parts[-len(folder_parts):]==folder_parts:
+        directory=base
+    else:
+        directory=base/folder if rendered_folder else base
+    return directory/(rendered_title+extension)
 
 
 def rip_readiness(master, disc):

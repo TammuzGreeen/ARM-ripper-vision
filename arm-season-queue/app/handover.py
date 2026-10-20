@@ -79,6 +79,23 @@ def publish_json(path, body):
         temp.unlink(missing_ok=True)
 
 
+def write_json_atomic(path, body):
+    """Atomically replace a mutable private review record and sync its directory."""
+    path=Path(path)
+    mkdir_durable(path.parent)
+    data=json.dumps(body,sort_keys=True,ensure_ascii=False,indent=2).encode()+b'\n'
+    fd,name=tempfile.mkstemp(prefix='.review-',dir=path.parent)
+    temp=Path(name)
+    try:
+        with os.fdopen(fd,'wb') as stream:
+            stream.write(data);stream.flush();os.fsync(stream.fileno())
+        os.chmod(temp,0o600)
+        os.replace(temp,path)
+        sync_dir(path.parent)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 LANG = {'deu':'deu','ger':'deu','fre':'fra','fra':'fra','dut':'nld','nld':'nld'}
 
 

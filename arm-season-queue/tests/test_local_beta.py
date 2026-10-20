@@ -1,15 +1,21 @@
 import json
+import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from fastapi.testclient import TestClient
+
 from app.arm import ARM
 from app.config import Settings
 from app.controller import Controller
+from app.main import create_app
 from app.state import Store, encode
+from app.formats import arm_output_path, output_destination
 
 
 class LocalBetaTests(unittest.TestCase):
@@ -20,6 +26,20 @@ class LocalBetaTests(unittest.TestCase):
             Settings(local_beta=True,dry_run_only=False,fileflows_enabled=True,password='test')
         valid=Settings(local_beta=True,dry_run_only=False,fileflows_enabled=False,password='test')
         self.assertTrue(valid.local_beta)
+
+    def test_arm_tray_action_uses_explicit_arm_api_method(self):
+        arm=ARM.__new__(ARM);arm.held=Mock();arm.call=Mock(return_value={'success':True})
+        arm.tray(1,'close')
+        arm.call.assert_called_once_with('POST','/drives/1/eject',{'method':'close'})
+        with self.assertRaisesRegex(ValueError,'explicit eject or close'):
+            arm.tray(1,'toggle')
+
+    def test_tray_cycle_configuration_requires_local_beta(self):
+        with self.assertRaisesRegex(ValueError,'Tray cycling requires LOCAL_BETA_ENABLED=true'):
+            Settings(tray_cycle_enabled=True,local_beta=False,dry_run_only=False,
+                     fileflows_enabled=False,password='test')
+        self.assertTrue(Settings(tray_cycle_enabled=True,local_beta=True,dry_run_only=False,
+                                 fileflows_enabled=False,password='test').tray_cycle_enabled)
 
     def test_fresh_nonempty_capture_can_proceed_with_model_failure_as_provisional(self):
         self.assertTrue(Controller.local_beta_capture_usable({
@@ -57,15 +77,32 @@ class LocalBetaTests(unittest.TestCase):
         self.assertTrue(any(args[1].endswith('/tracks/10') for args in calls))
         self.assertTrue(any(args[1].endswith('/tracks/11') for args in calls))
         self.assertEqual(arm.held.call_count,1)
+        self.assertFalse(any(call.args[1].endswith('/naming') for call in arm.call.call_args_list))
+
+    def test_arm_configuration_sends_readable_masterlist_name_without_folder_override(self):
+        arm=ARM.__new__(ARM);arm.held=Mock()
+        initial={'job':{'status':'manual_paused','manual_start':False},
+                 'config':{'SKIP_TRANSCODE':'true','RIPMETHOD':'mkv','MAINFEATURE':False,'MINLENGTH':0,'MAXLENGTH':99998},
+                 'tracks':[{'track_id':13,'track_number':'0','enabled':True}]}
+        reread={'tracks':[{'track_id':13,'track_number':'0','enabled':True,'custom_filename':'Star Trek - Voyager S02E01 - Die 37er','episode_number':'1'}]}
+        arm.detail=Mock(side_effect=[initial,reread])
+        arm.call=Mock(return_value={'tracks':[{'track_number':'0','rendered_title':'Star Trek - Voyager S02E01 - Die 37er','rendered_folder':'Star Trek - Voyager/Season 02'}]})
+        mapping=[{'arm_track_id':13,'makemkv_id':0,'basename':'Star Trek - Voyager S02E01 - Die 37er',
+                  'content_name':'Die 37er','episode':{'number':1}}]
+        arm.configure(5,SimpleNamespace(series='Star Trek: Voyager',season=2),mapping)
+        calls=[call.args for call in arm.call.call_args_list]
+        self.assertTrue(any('/tracks/13' in args[1] and args[2]['custom_filename']==mapping[0]['basename'] for args in calls))
+        self.assertFalse(any(args[1].endswith('/naming') for args in calls))
 
     def test_unmatched_beta_reservation_records_all_titles_and_uses_provisional_names(self):
         with TemporaryDirectory() as tmp:
-            root=Path(tmp);media=root/'media';(media/'unreviewed').mkdir(parents=True)
+            root=Path(tmp);media=root/'media';media.mkdir(parents=True)
             c=Controller.__new__(Controller);c.lock=threading.RLock();c.s=SimpleNamespace(
                 local_beta=True,drive='/dev/sr0',media=media,beta_output_root=str(media/'unreviewed'),
-                beta_min_free_bytes=1)
+                arm_media='/home/arm/media',beta_min_free_bytes=1)
             c.db=Store(root/'state'/'queue.sqlite3');c.masters=lambda:[]
-            c.arm=SimpleNamespace(held=Mock(),jobs=Mock(return_value=[{'job_id':8,'status':'manual_paused'}]),
+            c.arm=SimpleNamespace(held=Mock(),completed_directory=Mock(return_value=Path('/home/arm/media/completed/tv/Unknown series/Season 02')),
+                jobs=Mock(return_value=[{'job_id':8,'status':'manual_paused'}]),
                 call=Mock(return_value={'drives':[{'mount':'/dev/sr0','job_id_current':8,'drive_mode':'auto'}]}))
             event_id=c.db.new_event('camera')
             c.db.execute("UPDATE events SET status='ready',released=1,job=8 WHERE id=?",(event_id,))
@@ -85,9 +122,49 @@ class LocalBetaTests(unittest.TestCase):
             self.assertEqual(payload['excluded_titles'],[])
             self.assertTrue(all(x['provisional'] for x in payload['mapping']))
             self.assertTrue(all('PROVISIONAL' in x['basename'] for x in payload['mapping']))
-            output_dir=media/'unreviewed'/'arm-season-queue'/'job-8'
-            self.assertTrue(output_dir.is_dir())
-            self.assertEqual(output_dir.stat().st_mode & 0o777,0o770)
+            self.assertTrue(all(x['naming_attribution']['episode_title_source']=='unknown' for x in payload['mapping']))
+            self.assertTrue(all(str(x['destination']).startswith(str(media/'completed'/'tv')) for x in payload['mapping']))
+            self.assertTrue(all('arm-season-queue/job-' not in x['destination'] for x in payload['mapping']))
+
+    def test_snapshot_close_requires_saved_event_and_explicitly_calls_arm_close(self):
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);state=root/'state';media=root/'media'
+            c=Controller.__new__(Controller);c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True,tray_close_enabled=True,
+                state=state,ttl=180,batch_switch_policy='review',drive='/dev/sr0')
+            c.db=Store(state/'queue.sqlite3');event=c.db.new_event('camera')
+            (state/'evidence'/event).mkdir(parents=True)
+            evidence=state/'evidence'/event/'0.jpg';evidence.write_bytes(b'captured')
+            c.db.execute("UPDATE events SET status='processing',created=?,body=? WHERE id=?",
+                         (time.time(),encode({'source':'camera'}),event))
+            c.db.put('active_batch','batch-1')
+            c.db.execute('INSERT INTO batches VALUES (?,?,?)',('batch-1','{}','running'))
+            c.arm=ARM.__new__(ARM);c.arm.held=Mock()
+            c.arm.call=Mock(side_effect=[{'drives':[{'mount':'/dev/sr0','drive_mode':'auto','drive_id':1,'job_id_current':None}]},
+                                         {'success':True}])
+            result=c.close_tray_after_snapshot(event,[{'evidence':f'{event}/0.jpg'}])
+            self.assertEqual(result['status'],'closed')
+            self.assertEqual(c.arm.call.call_args_list[-1].args,
+                             ('POST','/drives/1/eject',{'method':'close'}))
+            saved=json.loads(c.db.rows('SELECT body FROM events WHERE id=?',(event,))[0]['body'])
+            self.assertEqual(saved['tray_action']['status'],'closed')
+
+    def test_snapshot_never_closes_when_arm_reports_an_existing_job(self):
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);state=root/'state'
+            c=Controller.__new__(Controller);c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True,tray_close_enabled=True,
+                state=state,ttl=180,drive='/dev/sr0')
+            c.db=Store(state/'queue.sqlite3');event=c.db.new_event('camera')
+            (state/'evidence'/event).mkdir(parents=True)
+            (state/'evidence'/event/'0.jpg').write_bytes(b'captured')
+            c.db.execute("UPDATE events SET status='processing',created=?,body=? WHERE id=?",
+                         (time.time(),encode({'source':'camera'}),event))
+            c.db.put('active_batch','batch-1');c.db.execute('INSERT INTO batches VALUES (?,?,?)',('batch-1','{}','running'))
+            c.arm=SimpleNamespace(held=Mock(),call=Mock(return_value={'drives':[
+                {'mount':'/dev/sr0','drive_mode':'auto','drive_id':1,'job_id_current':44}]}))
+            result=c.close_tray_after_snapshot(event,[{'evidence':f'{event}/0.jpg'}])
+            self.assertEqual(result['status'],'failed')
+            self.assertEqual(c.arm.call.call_count,1)
+            self.assertNotIn('POST',[call.args[0] for call in c.arm.call.call_args_list])
 
     def _controller(self, root, outputs):
         c=Controller.__new__(Controller)
@@ -133,6 +210,132 @@ class LocalBetaTests(unittest.TestCase):
                 c.review_local_beta(7,'save_reviewed',{'corrections':{'0':{'filename':'Taken.mkv'}}})
             self.assertTrue(source.is_file())
             self.assertEqual(c.db.rows('SELECT state FROM reservations WHERE job=7')[0]['state'],'awaiting_review')
+
+    def test_arm_output_path_deduplicates_existing_job_folder(self):
+        self.assertEqual(str(arm_output_path('/media/completed/tv/Show/Season 02','Show/Season 02','Show S02E01 - Pilot')),
+                         '/media/completed/tv/Show/Season 02/Show S02E01 - Pilot.mkv')
+        self.assertEqual(str(arm_output_path('/media/completed/tv/Show/Season 02','Extras','Special')),
+                         '/media/completed/tv/Show/Season 02/Extras/Special.mkv')
+
+    def test_known_masterlist_output_is_readable_and_not_generic(self):
+        from tests.test_core import master
+        m=master().model_copy(update={'schema_version':2});disc=m.discs[0];item=disc.title_map[0]
+        planned=output_destination(m,disc,item)
+        self.assertIn('S02E01',planned)
+        self.assertIn(disc.episodes[item.episode_index].title,planned)
+        self.assertNotIn(m.edition_name,planned)
+        self.assertNotIn('ASQ-',planned)
+
+    def test_arm_completed_directory_uses_live_config_and_normal_pattern(self):
+        arm=ARM.__new__(ARM);arm.s=SimpleNamespace(arm_media='/home/arm/media')
+        arm.call=Mock(return_value={'config':{'COMPLETED_PATH':'/home/arm/media/completed/',
+            'TV_SUBDIR':'tv','TV_FOLDER_PATTERN':'{show}/Season {season}'}})
+        master=SimpleNamespace(series='Star Trek: Voyager',season=2)
+        self.assertEqual(str(arm.completed_directory({'video_type':'series'},master)),
+                         '/home/arm/media/completed/tv/Star Trek - Voyager/Season 02')
+
+    def test_starting_entry_context_is_advisory_and_does_not_mark_prior_entries(self):
+        from tests.test_core import master
+        c=Controller.__new__(Controller);c.db=Store(Path(tempfile.mkdtemp())/'queue.sqlite3')
+        m=master();batch=c.select_batch(m,{'disc':m.discs[0].id,'entry_index':2})
+        saved=c.db.get('batch_contexts')[batch]
+        self.assertTrue(saved['advisory_only']);self.assertEqual(saved['start']['entry_index'],2)
+        self.assertNotIn('completed',json.dumps(saved).lower())
+        with self.assertRaisesRegex(ValueError,'different advisory starting hint'):
+            c.select_batch(m,{'disc':m.discs[0].id,'entry_index':3})
+        self.assertEqual(c.db.get('batch_contexts')[batch],saved)
+
+    def test_successful_completion_uses_persisted_job_not_current_drive_association(self):
+        import hashlib
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);state=root/'state';media=root/'media';relative='completed/tv/Show/Season 02/Show S02E01 - Pilot.mkv'
+            path=media/relative;path.parent.mkdir(parents=True);path.write_bytes(b'verified media fixture')
+            identity={'job_id':5,'start_time':'start','devpath':'/dev/sr0','source_type':'dvd'}
+            payload={'workflow':'local-beta-v1','identity':__import__('app.arm',fromlist=['job_identity']).job_identity(identity),
+                'mapping':[{'arm_track_id':13,'makemkv_id':0,'basename':'Show S02E01 - Pilot','episode':{'number':1,'title':'Pilot'},'scan_duration':100,'inventory':None}],
+                'naming_preview':{'tracks':[{'track_number':'0','rendered_title':'Show S02E01 - Pilot','rendered_folder':'Show/Season 02'}]},
+                'selected_titles':[],'excluded_titles':[],'source_titles':[],'selection_policy':'fixture','mapping_source':'fixture',
+                'identity_fields':{},'warnings':[],'recognition':{},'observed_label':'disc'}
+            c=Controller.__new__(Controller);c.s=SimpleNamespace(state=state,media=media,arm_media='/home/arm/media',media_host_prefix='',app_version='test',camera='/dev/video0',camera_rotation=0,roi='0,0,1,1',sharpness=0,vision_timeout=10,fileflows_enabled=False)
+            c.db=Store(state/'queue.sqlite3');c.arm=SimpleNamespace(
+                detail=Mock(return_value={'job':dict(identity,status='success')}),
+                call=Mock(return_value={'config':{'AUTO_EJECT':'False'}}))
+            c.db.execute('''INSERT INTO reservations(job,batch,disc,event,state,publication,body,error)
+                VALUES (5,'b','d','event','validating','local_review',?,'')''',(encode(payload),))
+            import app.controller as controller_module
+            original=controller_module.inspect_beta_file;controller_module.inspect_beta_file=lambda p,d:{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'validation':{'decode':'passed','stream_inventory':'passed'}}
+            try:c.finish_local_beta({'job':5,'batch':'b','disc':'d','event':'event'}, {'job':dict(identity,status='success',path='/home/arm/media/completed/tv/Show/Season 02'),'tracks':[{'track_id':13,'ripped':True,'enabled':True}]},payload)
+            finally:controller_module.inspect_beta_file=original
+            row=c.db.rows('SELECT state,body FROM reservations WHERE job=5')[0]
+            self.assertEqual(row['state'],'awaiting_review')
+            self.assertEqual(c.arm.detail.call_count,1)
+            self.assertEqual(payload['local_review']['outputs'][0]['host_path'],str(path))
+
+    def test_arm_eject_failure_is_warning_and_does_not_hide_successful_outputs(self):
+        import hashlib
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);state=root/'state';media=root/'media';relative='completed/tv/Show/Season 02/Show S02E01 - Pilot.mkv'
+            path=media/relative;path.parent.mkdir(parents=True);path.write_bytes(b'verified media fixture')
+            identity={'job_id':6,'start_time':'start','devpath':'/dev/sr0','source_type':'dvd'}
+            from app.arm import job_identity
+            payload={'workflow':'local-beta-v1','identity':job_identity(identity),'mapping':[{'arm_track_id':9,'makemkv_id':0,'basename':'Show S02E01 - Pilot','episode':{'number':1,'title':'Pilot'},'scan_duration':100,'inventory':None}],
+                'naming_preview':{'tracks':[{'track_number':'0','rendered_title':'Show S02E01 - Pilot','rendered_folder':'Show/Season 02'}]},
+                'selected_titles':[],'excluded_titles':[],'source_titles':[],'selection_policy':'fixture','mapping_source':'fixture','identity_fields':{},'warnings':[],'recognition':{},'observed_label':'disc'}
+            c=Controller.__new__(Controller);c.s=SimpleNamespace(state=state,media=media,arm_media='/home/arm/media',media_host_prefix='',app_version='test',camera='/dev/video0',camera_rotation=0,roi='0,0,1,1',sharpness=0,vision_timeout=10,fileflows_enabled=False)
+            c.db=Store(state/'queue.sqlite3');terminal={'job':dict(identity,status='success',errors='AUTO_EJECT failed: tray error',ejected=False)}
+            c.arm=SimpleNamespace(detail=Mock(return_value=terminal),call=Mock(return_value={'config':{'AUTO_EJECT':'True'}}))
+            c.db.execute("INSERT INTO reservations(job,batch,disc,event,state,publication,body,error) VALUES (6,'b','d','event','validating','local_review',?,'')",(encode(payload),))
+            import app.controller as controller_module
+            original=controller_module.inspect_beta_file;controller_module.inspect_beta_file=lambda p,d:{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'validation':{'decode':'passed','stream_inventory':'passed'}}
+            try:c.finish_local_beta({'job':6,'batch':'b','disc':'d','event':'event'}, {'job':dict(identity,status='success',path='/home/arm/media/completed/tv/Show/Season 02'),'tracks':[{'track_id':9,'ripped':True,'enabled':True}]},payload)
+            finally:controller_module.inspect_beta_file=original
+            row=c.db.rows('SELECT state,error,body FROM reservations WHERE job=6')[0];saved=json.loads(row['body'])['local_review']
+            self.assertEqual(row['state'],'awaiting_review')
+            self.assertIn('AUTO_EJECT failed',row['error'])
+            self.assertEqual(saved['tray_action']['status'],'failed')
+            self.assertEqual(len(saved['outputs']),1)
+
+    def test_diagnostic_assessment_only_persists_feedback(self):
+        with TemporaryDirectory() as tmp:
+            settings=Settings(state=Path(tmp),local_beta=True,dry_run_only=False,fileflows_enabled=False,password='test')
+            app=create_app(settings,start_workers=False);client=TestClient(app);client.auth=('operator','test')
+            event=app.state.controller.db.new_event('vision_test')
+            app.state.controller.db.execute("UPDATE events SET status='review',body=? WHERE id=?",(encode({'source':'vision_test','result':{'series':'Observed'}}),event))
+            before=app.state.controller.db.rows('SELECT state FROM batches')
+            for outcome in ('correct','incorrect'):
+                response=client.post(f'/api/events/{event}/assessment',headers={'X-Queue-Request':'1'},json={'outcome':outcome,'note':'checked'})
+                self.assertEqual(response.status_code,200)
+            after=json.loads(app.state.controller.db.rows('SELECT body FROM events WHERE id=?',(event,))[0]['body'])
+            self.assertEqual([x['revision'] for x in after['diagnostic_assessments']],[1,2])
+            self.assertEqual([x['outcome'] for x in after['diagnostic_assessments']],['correct','incorrect'])
+            self.assertEqual(before,app.state.controller.db.rows('SELECT state FROM batches'))
+
+    def test_queue_open_does_not_eject_even_with_legacy_cycle_flag(self):
+        c=Controller.__new__(Controller);c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True)
+        c.arm=SimpleNamespace(tray=Mock())
+        self.assertIsNone(c.open_tray_for_queue())
+        c.arm.tray.assert_not_called()
+
+    def test_terminal_local_review_is_listed_when_post_rip_task_failed(self):
+        with TemporaryDirectory() as tmp:
+            settings=Settings(state=Path(tmp),local_beta=True,dry_run_only=False,
+                              fileflows_enabled=False,password='test')
+            app=create_app(settings,start_workers=False)
+            client=TestClient(app)
+            self.addCleanup(client.close)
+            client.auth=('operator','test')
+            controller=app.state.controller
+            payload={'workflow':'local-beta-v1','mapping':[],
+                     'local_review':{'status':'awaiting_review','outputs':[{'actual_path':'/actual/job/file.mkv'}]}}
+            controller.db.execute('''INSERT INTO reservations
+                (job,batch,disc,event,state,publication,body,error) VALUES (5,'batch','disc','capture',
+                'review','local_review',?,'tray action failed')''',(encode(payload),))
+            response=client.get('/api/local-beta/reviews?status=awaiting_review')
+            self.assertEqual(response.status_code,200)
+            self.assertEqual([item['job'] for item in response.json()['items']],[5])
+            self.assertEqual(response.json()['items'][0]['error'],'tray action failed')
+            self.assertEqual(response.json()['items'][0]['local_review']['outputs'][0]['actual_path'],
+                             '/actual/job/file.mkv')
 
 
 if __name__=='__main__':

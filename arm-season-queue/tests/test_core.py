@@ -134,7 +134,7 @@ class MappingTests(unittest.TestCase):
         m=Masterlist.model_validate(data);disc=m.discs[0]
         rows=plan(m,disc,{'job':{'job_id':5,'label':'EU_103539'},'tracks':[{'track_id':50,'track_number':'0','length':200,'fps':25}]})
         self.assertEqual(rows[0]['extra']['id'],'trailers')
-        self.assertIn('/Extras/',rows[0]['destination'])
+        self.assertIn('EXTRA',rows[0]['destination'])
 
     def test_multiple_versions_for_one_episode_have_distinct_output_paths(self):
         data=master().model_dump();data.update(schema_version=2)

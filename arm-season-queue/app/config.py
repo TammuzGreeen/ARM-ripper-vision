@@ -46,6 +46,8 @@ class Settings:
     dry_run_only: bool = env_bool('DRY_RUN_ONLY', False)
     dry_run_output_root: str = os.getenv('DRY_RUN_OUTPUT_ROOT', '/media/completed')
     local_beta: bool = env_bool('LOCAL_BETA_ENABLED', False)
+    tray_cycle_enabled: bool = env_bool('LOCAL_BETA_TRAY_CYCLE_ENABLED', False)
+    tray_close_enabled: bool = env_bool('LOCAL_BETA_TRAY_CLOSE_ENABLED', False)
     app_version: str = os.getenv('APP_VERSION', 'development')
     beta_output_root: str = os.getenv('BETA_OUTPUT_ROOT', '/media/unreviewed')
     media_host_prefix: str = os.getenv('MEDIA_HOST_PREFIX', '')
@@ -80,6 +82,10 @@ class Settings:
             raise ValueError('Invalid switch policy, capture TTL or evidence retention')
         if self.local_beta and (self.dry_run_only or self.fileflows_enabled):
             raise ValueError('Local beta requires DRY_RUN_ONLY=false and FILEFLOWS_ENABLED=false')
+        if self.tray_cycle_enabled and not self.local_beta:
+            raise ValueError('Tray cycling requires LOCAL_BETA_ENABLED=true')
+        if self.tray_close_enabled and not self.local_beta:
+            raise ValueError('Tray close requires LOCAL_BETA_ENABLED=true')
         if self.beta_min_free_bytes < 1:
             raise ValueError('BETA_MIN_FREE_BYTES must be positive')
 

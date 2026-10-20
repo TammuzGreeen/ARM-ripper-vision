@@ -1,4 +1,5 @@
 import httpx
+from pathlib import PurePosixPath
 
 from .config import REFERENCE_SHA
 from .formats import digest, output_destination, rip_readiness
@@ -68,8 +69,41 @@ class ARM:
         self.held()
         return self.call('POST', f'/drives/{drive_id}/eject', {'method': 'eject'})
 
+    def tray(self, drive_id, method):
+        """Use ARM's verified drive API for an explicit open/close, never toggle."""
+        if isinstance(drive_id, bool) or not isinstance(drive_id, int) or drive_id < 1:
+            raise ValueError('ARM did not provide a valid drive identifier; tray was not actuated')
+        if method not in ('eject','close'):
+            raise ValueError('Tray method must be explicit eject or close')
+        self.held()
+        return self.call('POST',f'/drives/{drive_id}/eject',{'method':method})
+
     def detail(self, job):
         return self.call('GET',f'/jobs/{job}/detail')
+
+    def completed_directory(self, job, master=None):
+        """Resolve an output under ARM's effective normal completed tree."""
+        from pathlib import PurePosixPath
+        from .formats import arm_name
+        config=self.call('GET','/settings/config').get('config',{})
+        root=PurePosixPath(str(config.get('COMPLETED_PATH') or '').rstrip('/'))
+        if not root.is_absolute():
+            raise ValueError('ARM did not expose an absolute COMPLETED_PATH')
+        if master is None:
+            path=PurePosixPath(str(job.get('path') or ''))
+            media=PurePosixPath(self.s.arm_media)
+            if not path.is_absolute() or media not in path.parents:
+                raise ValueError('ARM job has no safe normal completed path for an unidentified disc')
+            return path
+        pattern=str(config.get('TV_FOLDER_PATTERN') or '{show}/Season {season}')
+        variables={'show':master.series,'title':master.series,'season':f'{master.season:02d}',
+                   'year':str(job.get('year') or ''),'disc':str(job.get('disc_number') or '')}
+        try: rendered=pattern.format_map(variables)
+        except (KeyError,ValueError) as exc:
+            raise ValueError('Unsupported ARM TV folder pattern for planned destination') from exc
+        parts=[arm_name(part) for part in rendered.split('/') if part.strip()]
+        subdir=str(config.get('TV_SUBDIR') or 'tv')
+        return root/subdir/PurePosixPath(*parts)
 
     def jobs(self):
         page, result = 1, []
@@ -94,8 +128,8 @@ class ARM:
         # Never PATCH job config: the inspected handler also modifies global config.
         self.call('PUT',f'/jobs/{job}/title',{'title':master.series,'season':master.season,'video_type':'series'})
         self.call('POST',f'/jobs/{job}/multi-title',{'enabled':True})
-        # Unique staging directory even when final destination episode names repeat on a retry.
-        self.call('PATCH',f'/jobs/{job}/naming',{'folder_pattern_override':f'arm-season-queue/job-{job}'})
+        # ARM resolves job.path to its configured series/season tree.
+        # Do not append a queue-specific folder during finalization.
         selected = {m['arm_track_id']:m for m in mapping}
         for track in detail['tracks']:
             payload = {'enabled':track['track_id'] in selected}
@@ -116,8 +150,8 @@ class ARM:
         by_id = {int(t['track_number']):t for t in preview['tracks']}
         for entry in mapping:
             rendered = by_id.get(entry['makemkv_id'],{})
-            if rendered.get('rendered_title')!=entry['basename'] or rendered.get('rendered_folder')!=f'arm-season-queue/job-{job}':
-                raise ValueError('ARM naming preview differs from the staging plan')
+            if rendered.get('rendered_title')!=entry['basename']:
+                raise ValueError('ARM naming preview differs from the planned filename')
         return preview
 
     def configure_provisional(self, job, identity, mapping):
@@ -142,8 +176,6 @@ class ARM:
         self.call('POST', f'/jobs/{job}/pause', {'paused': True})
         # No guessed season/episode is sent to ARM when identity is uncertain.
         self.call('POST', f'/jobs/{job}/multi-title', {'enabled': True})
-        folder = f'arm-season-queue/job-{job}'
-        self.call('PATCH', f'/jobs/{job}/naming', {'folder_pattern_override': folder})
         for track in detail['tracks']:
             item = selected[track['track_id']]
             self.call('PATCH', f"/jobs/{job}/tracks/{track['track_id']}", {
@@ -160,9 +192,8 @@ class ARM:
         by_id = {int(t['track_number']): t for t in preview['tracks']}
         for item in mapping:
             rendered = by_id.get(item['makemkv_id'], {})
-            if (rendered.get('rendered_title') != item['basename']
-                    or rendered.get('rendered_folder') != folder):
-                raise ValueError('ARM provisional naming preview differs from the collision-safe plan')
+            if rendered.get('rendered_title') != item['basename']:
+                raise ValueError('ARM provisional naming preview differs from the planned filename')
         return preview
 
 
@@ -212,13 +243,15 @@ def plan(master, disc, detail):
         dest = output_destination(master,disc,item)
         # ARM's filename sanitizer is stricter than the destination filesystem.
         # A short ASCII staging name avoids edition/title punctuation changing the preview.
-        variant = ''.join(ch for ch in (item.version or (f'A{item.angle:02d}' if item.angle else '')) if ch.isalnum())[:16]
-        basename = f'ASQ-S{master.season:02d}-D{disc.number:02d}-T{item.makemkv_id:03d}' + (f'-{variant}' if variant else '')
+        basename = PurePosixPath(dest).stem
         result.append({'arm_track_id':track['track_id'], 'makemkv_id':item.makemkv_id,
                         'dvd_title':item.dvd_title,'angle':item.angle,'mapping_evidence':item.evidence,
                         'episode':ep.model_dump() if ep else None,
                         'extra':extra.model_dump() if extra else None,
                         'content_name':content_name,'version':item.version,
+                        'naming_attribution':{'masterlist_id':master.id,
+                            'masterlist_sha256':digest(master),'mapping_evidence':item.evidence,
+                            'episode_title_source':'approved masterlist' if ep and ep.title else 'unknown'},
                         'destination':dest,'basename':basename,
                         'inventory':inventory.model_dump(),
                         'scan_duration':track['length'],'scan':track})

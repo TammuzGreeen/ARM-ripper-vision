@@ -30,6 +30,7 @@
       ${item.error?`<p class="error">Job error: ${esc(item.error)}</p>`:''}
       ${(review.warnings||[]).length?`<aside class="warning"><strong>Warnings / assumptions</strong><ul>${review.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></aside>`:''}
       ${review.arm_progress?`<details><summary>Last ARM progress update · ${esc(review.arm_progress.status)} · ${esc(review.arm_progress.updated_at)}</summary><pre>${esc(JSON.stringify(review.arm_progress.tracks,null,2))}</pre></details>`:''}
+      ${review.tray_action?`<p class="${review.tray_action.status==='failed'||review.tray_action.status==='not_confirmed'?'warning':''}">Tray: ARM AUTO_EJECT · ${esc(review.tray_action.status)}${review.tray_action.error?` · ${esc(review.tray_action.error)}`:''}${review.tray_action.physical_open_verified?' · physically verified':' · physical state not verified'}</p>`:''}
       <details open><summary>Captured evidence and recognition</summary><div class="beta-images">${originals}</div><p><b>Combined fields:</b></p><pre>${esc(JSON.stringify(result.agreement||{},null,2))}</pre>${modelBlocks}</details>
       <details><summary>Scan, selection and exclusions</summary><pre>${esc(JSON.stringify({source_titles:scan,selection_policy:review.selection_policy||item.workflow,selected:review.selected_titles||item.mapping,excluded:review.excluded_titles||[],masterlist:review.masterlist||item.masterlist,provenance:review.masterlist_provenance},null,2))}</pre></details>
       ${identityForm}<div class="beta-title-list">${titleRows}</div>
@@ -38,7 +39,7 @@
       <div class="buttons"><button data-review="accept">Accept as correct</button><button data-review="save_reviewed">Save corrections and mark reviewed</button><button data-review="needs_attention">Needs attention / leave unreviewed</button></div><p class="beta-result" role="status"></p></article>`;
   }
   async function load(){
-    try{const state=await api('/api/state');document.getElementById('local-beta-review').hidden=!state.local_beta_enabled;const dry=document.getElementById('dry-run-panel');if(dry)dry.hidden=!state.dry_run_only}catch{}
+    try{const state=await api('/api/state');document.getElementById('local-beta-review').hidden=!state.local_beta_enabled;const dry=document.getElementById('dry-run-panel');if(dry)dry.hidden=!state.dry_run_only;const status=document.getElementById('beta-tray-status');if(status)status.textContent='ARM AUTO_EJECT owns automatic opening after terminal rips. Queue-open/post-rip tray commands are disabled; per-job physical tray state is reported as unverified unless observed.'}catch{}
     root.textContent='Loading local beta reviews…';
     try{const data=await api('/api/local-beta/reviews?status='+encodeURIComponent(filter.value));root.innerHTML=data.items.map(render).join('')||'<p>No matching local beta jobs.</p>';
       root.querySelectorAll('[data-review]').forEach(button=>button.addEventListener('click',async()=>{

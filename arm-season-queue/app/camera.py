@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import time
 from dataclasses import replace
@@ -39,10 +40,12 @@ class PresentationGate:
 
 
 class Camera:
-    def __init__(self, settings, on_begin, on_result, on_release, get_masters=None):
+    def __init__(self, settings, on_begin, on_result, on_release, get_masters=None,
+                 on_snapshot_saved=None):
         self.s = settings
         self.on_begin, self.on_result, self.on_release = on_begin, on_result, on_release
         self.get_masters = get_masters or (lambda: [])
+        self.on_snapshot_saved = on_snapshot_saved or (lambda event, refs: None)
         self.lock = threading.RLock()
         self.stop = threading.Event()
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='local-ocr')
@@ -245,6 +248,19 @@ class Camera:
             self.status['message'] = ('Empty view saved. Place the disc, then click Capture disc now'
                                       if self.mode == 'manual' else 'Ready: present media inside the preview')
 
+    def tray_opened(self, initial=False):
+        """Release the previous capture latch so the next tray presentation can trigger."""
+        with self.lock:
+            self.event = None
+            self.event_started_at = None
+            self.samples = []
+            self.full_samples = []
+            self.gate = PresentationGate()
+            if initial:
+                self.background = None
+                self.status['calibrated'] = False
+                self.status['message'] = 'Tray opened. Clear it, then calibrate the empty-tray view once.'
+
     @staticmethod
     def small(frame):
         return cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (160,100)).astype(np.float32)
@@ -382,6 +398,7 @@ class Camera:
     def process(self, event, images, test_only=False, source='webcam', preserve_existing=False,
                 original_images=None, capture_quality=None):
         results = []
+        tray_action = None
         vision = self.s.recognition_backend != 'tesseract'
         try:
             evidence = self.s.state/'evidence'/event
@@ -400,11 +417,32 @@ class Camera:
                     if not cv2.imwrite(str(original_path), original_images[i], [cv2.IMWRITE_JPEG_QUALITY, 95]):
                         raise RuntimeError('Could not retain the original camera capture')
                     original_path.chmod(0o600)
+            if (source == 'webcam' and not test_only and results
+                    and getattr(self.s,'tray_close_enabled',False)):
+                # Snapshot bytes are durable before ARM is asked to close/rescan.
+                for retained in evidence.iterdir():
+                    if retained.is_file():
+                        fd=os.open(retained,os.O_RDONLY)
+                        try:
+                            os.fsync(fd)
+                        finally:
+                            os.close(fd)
+                for directory in (evidence,evidence.parent):
+                    fd=os.open(directory,os.O_RDONLY|os.O_DIRECTORY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                tray_action = self.on_snapshot_saved(event, results)
+                if tray_action and tray_action.get('status') == 'closed':
+                    self.release(event)
             if self.s.recognition_backend == 'ollama-agreement' and not test_only:
                 result = recognize_agreement(self.s, images, event, self.get_masters())
                 result['frames'] = results
                 result['camera'] = self.s.camera
                 result['backend'] = self.s.recognition_backend
+                if tray_action is not None:
+                    result['tray_action']=tray_action
             elif self.s.recognition_backend == 'ollama-agreement' and test_only:
                 # Manual diagnostic snapshots remain review-only; they never call
                 # the two-model authorization path.
@@ -436,6 +474,8 @@ class Camera:
             if originals:
                 result['original_evidence'] = [f'{event}/{path.name}' for path in originals]
             result.setdefault('camera', self.s.camera)
+            if tray_action is not None:
+                result['tray_action']=tray_action
             if capture_quality:
                 result['capture_quality']=capture_quality
             self.on_result(event, result)
@@ -446,6 +486,8 @@ class Camera:
             failure = {'accepted':False, 'test_only':test_only,
                        'capture_source':source,'camera':self.s.camera if source=='webcam' else None,
                        'frames':results, 'reason':reason, 'backend':self.s.recognition_backend}
+            if tray_action is not None:
+                failure['tray_action']=tray_action
             if capture_quality:
                 failure['capture_quality']=capture_quality
             if isinstance(exc, VisionError):

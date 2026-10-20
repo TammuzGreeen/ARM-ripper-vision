@@ -1,0 +1,29 @@
+(()=>{
+ const root=document.getElementById('recognition-log'),more=document.getElementById('recognition-more');if(!root||!more)return;
+ const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ let offset=0,total=0,loading=false;
+ async function api(url,body){const r=await fetch(url,{method:body?'POST':'GET',headers:{'Content-Type':'application/json','X-Queue-Request':'1'},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.detail||r.statusText);return d}
+ function itemHtml(e,state){
+  const b=e.body||{},r=b.result||{},agreement=r.agreement||{},fields=agreement.field_combinations||{},reservation=(state?.reservations||[]).find(x=>x.job===e.job),review=reservation?.local_review,outputs=review?.outputs||[];
+  const primary=Object.entries(fields).map(([k,v])=>`${k}: ${v.display_value??v.value??'unknown'}${(v.sources||[]).length?' ('+v.sources.map(s=>s.model||s.source||'source').join(', ')+')':''}`).join(' · ')||JSON.stringify(b.matches||[]);
+  const progress=reservation?`${reservation.state}${reservation.arm_progress?.status?' · ARM '+reservation.arm_progress.status:''}`:'No linked ARM job';
+  const finished=reservation?.finished_summary?.outputs||[];const actualOutputs=outputs.length?outputs:finished;
+  const actual=actualOutputs.length?actualOutputs.map(o=>`<li><code>${esc(o.host_path||o.actual_path||o.arm_output_path||o.destination||o.path||'path unavailable')}</code></li>`).join(''):'<li>No actual output recorded</li>';
+  const matched=(b.matches||[]).map(m=>`${m.series||m.master} · S${m.season??'?'} · Disc ${m.disc_number??m.disc??'?'}`).join(' | ');
+  const planned=(reservation?.mapping||[]).map(o=>`<li><code>${esc(o.destination||'planned path unavailable')}</code></li>`).join('')||'<li>No plan recorded</li>';
+  const runDetails=Object.entries(r.runs||{}).map(([tag,run])=>`<details><summary>${esc(tag)} · ${run.usable?'usable':'unusable'} · raw output</summary><pre>${esc(JSON.stringify(run,null,2))}</pre></details>`).join('');
+  const latest=(b.diagnostic_assessments||[]).at(-1),assessment=latest?`<p>Latest diagnostic: <b>${esc(latest.outcome)}</b> · revision ${latest.revision}${latest.note?' · '+esc(latest.note):''}</p>`:'<p>No diagnostic assessment yet.</p>';
+  const thumb=b.result?.frames?.find(x=>x.evidence)?.evidence||`${e.id}/original-0.jpg`,thumbUrl='/api/evidence/'+thumb;
+  return `<article class="recognition-row" data-event="${esc(e.id)}"><header><b>${new Date(e.created*1000).toLocaleString()} · ${esc(e.status)}</b><span>${e.job?`ARM job ${esc(e.job)}`:'No ARM insertion linked'}</span></header><div class="recognition-grid"><div><a href="${thumbUrl}" target="_blank"><img class="recognition-thumb" src="${thumbUrl}" alt="Representative retained recognition image"></a><details class="evidence-list"><summary>All retained evidence</summary><div class="evidence-links">Loading evidence…</div></details></div><div><b>Normalized recognition / attribution</b><p>${esc(primary)}</p>${matched?`<p>Reference match: ${esc(matched)}</p>`:''}<details><summary>Raw model outputs and technical details</summary>${runDetails}<pre>${esc(JSON.stringify({agreement,matches:b.matches,result_reason:r.reason},null,2))}</pre></details></div><div><b>ARM job / actual progress</b><p>${esc(progress)}</p><b>Actual files and folder</b><ul class="long-path">${actual}</ul><details><summary>Planned paths (not actual output)</summary><ul class="long-path">${planned}</ul></details></div></div>${assessment}<label>Optional note <input class="assessment-note" maxlength="1000" placeholder="What did you observe?"></label><div class="buttons"><button data-assess="correct">Correct</button><button data-assess="incorrect">Incorrect</button><span role="status"></span></div></article>`;
+ }
+ async function renderPage(append=false){if(loading)return;loading=true;more.disabled=true;try{
+  const notes=new Map([...root.querySelectorAll('.recognition-row')].map(card=>[card.dataset.event,card.querySelector('.assessment-note')?.value||'']));
+  const requestOffset=append?offset:0;const [data,state]=await Promise.all([api(`/api/events?offset=${requestOffset}&limit=20`),api('/api/state')]);total=data.total;
+  if(!append){root.replaceChildren();offset=0;}for(const ev of data.items){const wrap=document.createElement('div');wrap.innerHTML=itemHtml(ev,state);const card=wrap.firstElementChild;card.querySelector('.assessment-note').value=notes.get(ev.id)||'';root.append(card);
+   api(`/api/events/${encodeURIComponent(ev.id)}/evidence`).then(files=>{const box=card.querySelector('.evidence-links');box.replaceChildren(...files.items.map(f=>{const a=document.createElement('a');a.href=`/api/evidence/${encodeURIComponent(ev.id)}/${encodeURIComponent(f.name)}`;a.target='_blank';a.textContent=`${f.name} (${f.bytes} bytes)`;return a}))}).catch(()=>{});
+   card.querySelectorAll('[data-assess]').forEach(button=>button.addEventListener('click',async()=>{button.disabled=true;const status=card.querySelector('[role=status]');status.textContent='Saving diagnostic feedback…';try{const res=await api(`/api/events/${encodeURIComponent(ev.id)}/assessment`,{outcome:button.dataset.assess,note:card.querySelector('.assessment-note').value});status.textContent=`Saved revision ${res.assessment.revision}; processing and acceptance unchanged.`;await renderPage(false)}catch(err){status.textContent='Could not save: '+err.message;button.disabled=false}}));
+  }
+  offset+=data.items.length;more.hidden=!data.has_more;more.textContent=`Load more (${Math.min(total-offset,20)} of ${total-offset} remaining)`;
+ }catch(e){if(!root.children.length)root.textContent='Recognition history unavailable: '+e.message}else{}finally{loading=false;more.disabled=false}}
+ more.addEventListener('click',()=>renderPage(true));renderPage();setInterval(()=>renderPage(false),10000);
+})();

@@ -13,9 +13,9 @@ from uuid import uuid4
 from .arm import ARM, job_identity, plan, structure
 from .agreement import (MODEL_ORDER, POLICY as FIELD_EVIDENCE_POLICY, evaluate as evaluate_agreement,
                         normalize as normalize_printed, preflight as agreement_preflight)
-from .formats import Masterlist, digest, rip_readiness, safe_name
+from .formats import Masterlist, arm_name, arm_output_path, digest, rip_readiness, safe_name
 from .dry_run import build_plan as build_dry_run_plan, parse_info
-from .handover import beneath, canonical, inspect_beta_file, inspect_file, publish_json
+from .handover import beneath, canonical, checksum, inspect_beta_file, inspect_file, publish_json, write_json_atomic
 from .recognition import match
 from .state import Store, encode
 
@@ -29,6 +29,8 @@ class Controller:
         self.stop = threading.Event()
         self.validation = ThreadPoolExecutor(max_workers=1,thread_name_prefix='output-validation')
         self.futures = {}
+        self.on_tray_open = lambda initial=False: None
+        self.tray_initialized = False
         self.status = 'Not connected; camera and masterlist tools are available'
         self.initialized = False
         if not settings.dry_run_only:
@@ -115,7 +117,7 @@ class Controller:
         paths=[('state',self.s.state,True),('queue_media',self.s.media,False),
                ('handover',self.s.handover,self.s.fileflows_enabled)]
         if getattr(self.s,'local_beta',False):
-            paths.append(('beta_output',Path(self.s.beta_output_root),True))
+            paths.append(('completed_media',Path(self.s.media),True))
         for name, path, writable in paths:
             try:
                 fs=os.statvfs(path)
@@ -130,7 +132,7 @@ class Controller:
                 'camera_mode':self.s.camera_mode,'fileflows_enabled':self.s.fileflows_enabled,
                 'ready':bool(arm.get('ready') and models.get('ready') and not storage_issues)}
 
-    def activate(self, master_id=None):
+    def activate(self, master_id=None, start_disc=None, start_entry=None):
         with self.lock:
             if self.s.dry_run_only:
                 raise ValueError('This deployment is locked to dry-run mode; ARM jobs cannot be configured or started')
@@ -149,20 +151,102 @@ class Controller:
                 raise ValueError('Optional batch context does not identify a loaded reference')
             if master is not None and not master.approved and not getattr(self.s,'local_beta',False):
                 raise ValueError('Optional batch context must use confirmed technical instructions; leave it empty for unrestricted recognition')
+            if start_disc is not None and (master is None or start_disc not in {d.id for d in master.discs}):
+                raise ValueError('Starting-disc hint must belong to the selected masterlist')
+            if start_entry is not None:
+                if start_disc is None:
+                    raise ValueError('Choose a starting disc before choosing a starting entry')
+                selected_disc=next(d for d in master.discs if d.id==start_disc)
+                if isinstance(start_entry,bool) or not isinstance(start_entry,int) or not 0<=start_entry<len(selected_disc.episodes):
+                    raise ValueError('Starting-entry hint is outside the selected disc')
             self.baseline()
-            return self.select_batch(master)
+            batch=self.select_batch(master,{'disc':start_disc,'entry_index':start_entry})
+            return batch
 
-    def select_batch(self, master):
+    def select_batch(self, master, context=None):
         batch_identity=digest(master) if master else digest({'batch_context':None})
         existing = [r for r in self.db.rows("SELECT * FROM batches WHERE state!='cancelled'")
                     if digest(json.loads(r['master']))==batch_identity]
         batch = existing[0]['id'] if existing else str(uuid4())
+        requested_context=context or {'disc':None,'entry_index':None}
+        contexts=self.db.get('batch_contexts',{})
+        if existing and batch in contexts and contexts[batch].get('start')!=requested_context:
+            raise ValueError('This season batch already has a different advisory starting hint; its history was preserved')
         with self.db.connect() as db:
             db.execute("UPDATE batches SET state='paused' WHERE state='running'")
             snapshot=master.model_dump_json() if master else json.dumps({'schema_version':1,'batch_context':None})
             db.execute('INSERT OR REPLACE INTO batches VALUES (?,?,?)',(batch,snapshot,'running'))
         self.db.put('active_batch',batch)
+        contexts.setdefault(batch,{'start':requested_context,'advisory_only':True})
+        self.db.put('batch_contexts',contexts)
         return batch
+
+    def _verified_idle_drive(self):
+        self.arm.held()
+        drives=self.arm.call('GET','/drives').get('drives',[])
+        selected=[d for d in drives if d.get('mount')==self.s.drive]
+        if len(selected)!=1 or selected[0].get('drive_mode')!='auto':
+            raise ValueError('Tray action requires the configured ARM auto-mode drive')
+        if any(d.get('job_id_current') is not None for d in drives):
+            raise ValueError('Tray action blocked: ARM reports a current job; no tray command was sent')
+        drive_id=selected[0].get('drive_id')
+        if isinstance(drive_id,bool) or not isinstance(drive_id,int) or drive_id<1:
+            raise ValueError('ARM did not provide a valid configured drive ID')
+        return drive_id
+
+    def open_tray_for_queue(self):
+        # ARM AUTO_EJECT owns every automatic open; queue activation never
+        # issues a competing tray command.
+        return None
+
+    def close_tray_after_snapshot(self,event,frame_refs):
+        """Close only after durable capture, through ARM, with no current insertion."""
+        if not (getattr(self.s,'local_beta',False) and getattr(self.s,'tray_close_enabled',False)):
+            return {'status':'disabled'}
+        rows=self.db.rows('SELECT body,status,created FROM events WHERE id=?',(event,))
+        if len(rows)!=1 or rows[0]['status']!='processing':
+            return {'status':'failed','error':'Capture event is not a fresh processing event'}
+        body=json.loads(rows[0]['body'])
+        if body.get('source')!='camera' or time.time()-rows[0]['created']>=self.s.ttl:
+            return {'status':'failed','error':'Capture is not a fresh automatic webcam presentation'}
+        evidence=self.s.state/'evidence'
+        for frame in frame_refs:
+            reference=frame.get('evidence','')
+            if not reference.startswith(event+'/'):
+                return {'status':'failed','error':'Snapshot evidence does not belong to this event'}
+            path=beneath(evidence,reference)
+            if not path.is_file() or path.stat().st_size<=0:
+                return {'status':'failed','error':'Snapshot evidence was not durably retained'}
+        batch_id=self.db.get('active_batch')
+        batch=self.db.rows('SELECT state FROM batches WHERE id=?',(batch_id,))
+        if not batch or batch[0]['state']!='running':
+            return {'status':'failed','error':'Queue batch is paused; tray remains open'}
+        try:
+            drive_id=self._verified_idle_drive()
+        except Exception as exc:
+            action={'method':'close','status':'failed','at':time.time(),'error':str(exc)}
+            body['tray_action']=action
+            self.db.execute('UPDATE events SET body=? WHERE id=?',(encode(body),event))
+            self.db.put('tray_cycle_status',action)
+            return action
+        action={'method':'close','status':'intent','drive_id':drive_id,'at':time.time(),
+                'evidence':[f.get('evidence') for f in frame_refs]}
+        body['tray_action']=action
+        self.db.execute('UPDATE events SET body=? WHERE id=?',(encode(body),event))
+        try:
+            self.arm.tray(drive_id,'close')
+            action.update(status='closed',completed_at=time.time(),
+                          detail='ARM closed the tray and started its drive rescan')
+        except Exception as exc:
+            action.update(status='failed',completed_at=time.time(),error=str(exc))
+        body['tray_action']=action
+        self.db.execute('UPDATE events SET body=? WHERE id=?',(encode(body),event))
+        self.db.put('tray_cycle_status',action)
+        return action
+
+    def open_tray_after_job(self,job,payload,expected_status):
+        # Retained as a compatibility shim for recovery code; never actuates.
+        return {'status':'disabled','owner':'ARM AUTO_EJECT'}
 
     def begin_event(self, source):
         run = self.db.get('active_dry_run')
@@ -677,7 +761,12 @@ class Controller:
         matched_reference = next((m for m in results if matches and m.id==matches[0].get('master')),None)
         pass_result = bool(field_evidence_valid and len(matches)==1 and matched_reference and matched_reference.approved)
         automatic_source = result.get('camera') is not None or result.get('backend') == 'ollama-agreement'
-        beta_capture = bool(getattr(self.s,'local_beta',False) and automatic_source and self.local_beta_capture_usable(result))
+        tray_ready=(not getattr(self.s,'tray_close_enabled',False)
+                    or (result.get('tray_action') or {}).get('status')=='closed')
+        if getattr(self.s,'tray_close_enabled',False) and not tray_ready:
+            result['reason']='Capture retained, but ARM did not confirm the tray closed; this insertion will not be started automatically.'
+        beta_capture = bool(getattr(self.s,'local_beta',False) and automatic_source
+                            and self.local_beta_capture_usable(result) and tray_ready)
         status = 'ready' if pass_result or beta_capture else 'review'
         if not result.get('accepted',False) and automatic_source:
             result['accepted'] = False
@@ -1197,8 +1286,7 @@ class Controller:
                 if item.get('status') not in ('success','fail','cancelled')]
         if [item.get('job_id') for item in active] != [job]:
             raise ValueError('ARM has another active job; refusing concurrent beta execution')
-        output_root = Path(self.s.beta_output_root)
-        output_root.mkdir(parents=True, exist_ok=True)
+        output_root = Path(self.s.media)
         free = shutil.disk_usage(output_root).free
         if free < self.s.beta_min_free_bytes:
             raise ValueError(f'Insufficient local beta space: {free} bytes free; require {self.s.beta_min_free_bytes}')
@@ -1223,11 +1311,15 @@ class Controller:
                     confirmed_mapping = plan(selected_master, selected_disc, detail)
                 except (ValueError, StopIteration):
                     confirmed_mapping = None
-        source_folder = PurePosixPath('arm-season-queue', f'job-{job}')
+        completed_directory=self.arm.completed_directory(detail['job'],selected_master if confirmed_mapping else None)
+        arm_media=PurePosixPath(self.s.arm_media)
+        if arm_media not in completed_directory.parents:
+            raise ValueError('Resolved ARM completed directory is outside ARM_MEDIA_PREFIX')
+        media_directory=PurePosixPath(self.s.media)/completed_directory.relative_to(arm_media)
         if confirmed_mapping:
             mapping = confirmed_mapping
             for item in mapping:
-                item['destination'] = str(PurePosixPath(self.s.beta_output_root) / source_folder / (item['basename'] + '.mkv'))
+                item['destination'] = str(media_directory / (item['basename'] + '.mkv'))
                 item['provisional'] = False
             selected_ids = {int(item['makemkv_id']) for item in mapping}
             excluded = [{'makemkv_id':int(t['track_number']), 'reason':'Not selected by this compatible confirmed masterlist mapping'}
@@ -1240,8 +1332,12 @@ class Controller:
                 number = int(track['track_number'])
                 if not 0 < int(track.get('length') or 0) <= 99998:
                     raise ValueError(f'Source title {number} is outside the supported per-title length range')
-                basename = f'Source Title {number:03d} - PROVISIONAL'
-                dest = PurePosixPath(self.s.beta_output_root) / source_folder / f'{basename}.mkv'
+                recognized_series=identity.get('series_display') or identity.get('series')
+                recognized_season=identity.get('season')
+                prefix=arm_name(str(recognized_series))+' ' if recognized_series else ''
+                season_part=f'S{int(recognized_season):02d} - ' if str(recognized_season or '').isdigit() else ''
+                basename = f'{prefix}{season_part}Source Title {number:03d} - PROVISIONAL'
+                dest = media_directory / f'{basename}.mkv'
                 path = beneath(self.s.media, str(dest.relative_to(PurePosixPath(self.s.media))))
                 if path.exists():
                     raise ValueError(f'Output already exists; refusing overwrite: {path}')
@@ -1251,6 +1347,9 @@ class Controller:
                     'version': None, 'basename': basename,
                     'destination': str(dest), 'destination_kind': 'provisional local beta output',
                     'mapping_evidence': 'source-title ID only; episode identity unresolved',
+                    'naming_attribution':{'series_source':'recognition observation' if recognized_series else 'unknown',
+                        'season_source':'recognition observation' if recognized_season is not None else 'unknown',
+                        'episode_title_source':'unknown','makemkv_id':number},
                     'inventory': None, 'scan_duration': int(track['length']), 'scan': track,
                     'provisional': True,
                 })
@@ -1279,21 +1378,9 @@ class Controller:
             'mapping_source': mapping_source, 'identity_fields': identity,
             'warnings': list(dict.fromkeys(warnings)),
         }
-        # Precreate ARM's exact per-job output directory under the queue's
-        # shared group. ARM runs as UID 1000 while review runs as UID 568;
-        # setgid + group-write is required so safe post-rip renames work.
-        output_directory=output_root/'arm-season-queue'/f'job-{job}'
-        if output_directory.exists():
-            raise ValueError(f'Job output directory already exists; refusing reuse: {output_directory}')
-        output_directory.mkdir(mode=0o2770,parents=True,exist_ok=False)
-        output_directory.chmod(0o2770)
-        if output_directory.stat().st_gid not in {os.getgid(),*os.getgroups()}:
-            output_directory.rmdir()
-            raise ValueError('ARM output directory did not inherit a queue-accessible group')
         try:
             self.db.claim(job, batch['id'], disc_id, event['id'], payload)
         except Exception as exc:
-            output_directory.rmdir()
             raise ValueError('Insertion was already reserved or could not be claimed: ' + str(exc)) from exc
 
     def advance(self, row, running, current):
@@ -1318,7 +1405,9 @@ class Controller:
             self.read_ack(row)
             return
         if status=='fail':
-            self.db.execute("UPDATE reservations SET state='failed',error=? WHERE job=?",(str(detail['job'].get('errors') or 'ARM failed; re-present and reinsert to retry'),job))
+            error=str(detail['job'].get('errors') or 'ARM failed; inspect the output before retrying')
+            self.db.execute("UPDATE reservations SET body=?,state='failed',error=? WHERE job=?",
+                            (encode(payload),error,job))
             return
         if status=='success':
             # `starting` is persisted before the non-idempotent POST. A success
@@ -1382,7 +1471,7 @@ class Controller:
                 if not track['ripped'] or track.get('error') or track.get('process') is False:
                     raise ValueError('A required title did not complete successfully')
                 rendered = preview[entry['makemkv_id']]
-                source = base/PurePosixPath(rendered['rendered_folder'])/(rendered['rendered_title']+'.mkv')
+                source = arm_output_path(base,rendered.get('rendered_folder'),rendered['rendered_title'])
                 relative = str(source.relative_to(prefix))
                 path = beneath(self.s.media,relative)
                 # A pre-upgrade reservation has no output-level inventory. Preserve
@@ -1428,7 +1517,7 @@ class Controller:
             rendered = preview.get(int(entry['makemkv_id']))
             if not rendered:
                 raise ValueError('ARM naming preview omitted a selected source title')
-            source = base / PurePosixPath(rendered['rendered_folder']) / (rendered['rendered_title'] + '.mkv')
+            source = arm_output_path(base,rendered.get('rendered_folder'),rendered['rendered_title'])
             relative = str(source.relative_to(PurePosixPath(self.s.arm_media)))
             path = beneath(self.s.media, relative)
             checked = (inspect_file(path,entry['inventory'],entry['scan_duration'])
@@ -1441,6 +1530,30 @@ class Controller:
         terminal = self.arm.detail(job)
         if terminal['job']['status'] != 'success' or job_identity(terminal['job']) != payload['identity']:
             raise ValueError('ARM completion changed during local output verification')
+        arm_config=self.arm.call('GET','/settings/config').get('config',{})
+        auto_eject=str(arm_config.get('AUTO_EJECT','false')).casefold() in ('true','1','yes')
+        tray_action={'owner':'ARM AUTO_EJECT','status':'disabled' if not auto_eject else 'pending',
+                     'command_confirmed':False,'physical_open_verified':False}
+        tray_warning=None
+        if auto_eject:
+            deadline=time.monotonic()+10
+            while time.monotonic()<deadline:
+                arm_job=terminal.get('job',{})
+                arm_errors=str(arm_job.get('errors') or '')
+                if 'AUTO_EJECT failed:' in arm_errors:
+                    tray_action.update(status='failed',error=arm_errors)
+                    break
+                if arm_job.get('ejected') is True:
+                    tray_action.update(status='command_succeeded_physical_state_unverified',command_confirmed=True)
+                    break
+                time.sleep(.5)
+                terminal=self.arm.detail(job)
+                if terminal.get('job',{}).get('status')!='success' or job_identity(terminal['job'])!=payload['identity']:
+                    raise ValueError('ARM terminal job changed while awaiting its automatic eject result')
+            else:
+                tray_action.update(status='not_confirmed',detail='ARM AUTO_EJECT did not confirm before timeout; physical tray state is unverified')
+            if tray_action['status']!='command_succeeded_physical_state_unverified':
+                tray_warning='ARM automatic eject was not confirmed: '+str(tray_action.get('error') or tray_action.get('detail') or 'inspect the tray')
         now=time.time()
         review = {'schema_version':1,'job':job,'event':row['event'],'batch':row['batch'],
                   'status':'awaiting_review','workflow':'local-beta-v1','created_at':now,
@@ -1462,12 +1575,14 @@ class Controller:
                   'masterlist_provenance':(payload.get('masterlist') or {}).get('provenance',[]),
                   'scan':payload['source_titles'],'selection_policy':payload['selection_policy'],
                   'selected_titles':payload['selected_titles'],'excluded_titles':payload['excluded_titles'],
-                  'mapping_source':payload['mapping_source'],'outputs':outputs,'warnings':payload.get('warnings',[]),
+                  'mapping_source':payload['mapping_source'],'outputs':outputs,
+                  'warnings':list(payload.get('warnings',[]))+([tray_warning] if tray_warning else []),
+                  'tray_action':tray_action,
                   'review_history':[],'feedback':{'reviewed_fields':[],'corrections':[]}}
         publish_json(self.s.state/'reviews'/f'{job}.json',review)
         payload['local_review']=review
-        self.db.execute("UPDATE reservations SET body=?,state='awaiting_review',publication='local_review',error='' WHERE job=?",
-                        (encode(payload),job))
+        self.db.execute("UPDATE reservations SET body=?,state='awaiting_review',publication='local_review',error=? WHERE job=?",
+                        (encode(payload),tray_warning or '',job))
 
     def review_local_beta(self, job, action, request):
         if not getattr(self.s,'local_beta',False):
@@ -1552,6 +1667,11 @@ class Controller:
                     raise ValueError(f'Filename already exists; refusing overwrite: {dest}')
                 if old is not None and (not old.is_file() or old.stat().st_size<=0):
                     raise ValueError(f'Expected local output is missing: {old}')
+                if old is not None:
+                    output=next(item for item,o,_,_ in planned if o==old)
+                    expected_hash=output.get('sha256')
+                    if expected_hash and checksum(old)!=expected_hash:
+                        raise ValueError(f'File content changed since validation; refusing rename: {old}')
             revision=len(review.get('review_history',[]))+1
             changes=[]
             temps=[]
@@ -1568,6 +1688,8 @@ class Controller:
                     if dest.exists():
                         raise ValueError(f'Filename appeared during correction; refusing overwrite: {dest}')
                     temp.rename(dest)
+                    if output.get('sha256') and checksum(dest)!=output['sha256']:
+                        raise IOError(f'Checksum changed during rename; recovery required: {dest}')
                     output['actual_path']=str(dest)
                     output['actual_filename']=dest.name
                     output['bytes']=dest.stat().st_size
@@ -1614,9 +1736,15 @@ class Controller:
             review['status']={'accept':'accepted','save_reviewed':'reviewed','needs_attention':'needs_attention'}[action]
             review['updated_at']=time.time()
             payload['local_review']=review
+            # Fail before changing SQLite/files if the persistent review folder
+            # cannot accept an atomic replacement (e.g. stale root-owned data).
+            import tempfile
+            review_dir=self.s.state/'reviews';review_dir.mkdir(parents=True,exist_ok=True)
+            probe_fd,probe_name=tempfile.mkstemp(prefix='.review-probe-',dir=review_dir)
+            os.close(probe_fd);Path(probe_name).unlink()
+            write_json_atomic(self.s.state/'reviews'/f'{job}.json',review)
             self.db.execute('UPDATE reservations SET body=?,state=?,publication=?,error=? WHERE job=?',
                             (encode(payload),review['status'],review['status'],'' if action!='needs_attention' else 'Operator requested attention',job))
-            publish_json(self.s.state/'reviews'/f'{job}.json',review)
             return review
 
     def read_ack(self,row):
@@ -1675,6 +1803,7 @@ class Controller:
             r['recognition']=body.get('recognition')
             r['arm_start_acknowledged']=bool(body.get('start_request_acknowledged_at'))
             r['naming_preview']=body.get('naming_preview')
+            r['arm_progress']=body.get('arm_progress')
             r['workflow']=body.get('workflow')
             r['local_review']=body.get('local_review')
             manifest_path=((self.s.handover/'ready') if self.s.fileflows_enabled else
@@ -1695,7 +1824,7 @@ class Controller:
         paths=[('state', self.s.state, True),('queue_media', self.s.media, False),
                ('handover', self.s.handover, self.s.fileflows_enabled)]
         if getattr(self.s,'local_beta',False):
-            paths.append(('beta_output',Path(self.s.beta_output_root),True))
+            paths.append(('completed_media',Path(self.s.media),True))
         for name, path, writable in paths:
             try:
                 stat = path.stat()
@@ -1715,5 +1844,9 @@ class Controller:
                 'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled,
                 'dry_run_only':self.s.dry_run_only,
                 'local_beta_enabled':getattr(self.s,'local_beta',False),
+                'tray_cycle_enabled':getattr(self.s,'tray_cycle_enabled',False),
+                'tray_close_enabled':getattr(self.s,'tray_close_enabled',False),
+                'tray_cycle_status':self.db.get('tray_cycle_status'),
+                'batch_context':(self.db.get('batch_contexts',{}).get(self.db.get('active_batch')) if self.db.get('active_batch') else None),
                  'dry_run':self.db.get('active_dry_run'),
                  'dry_run_history':self.db.get('dry_run_history',[])}

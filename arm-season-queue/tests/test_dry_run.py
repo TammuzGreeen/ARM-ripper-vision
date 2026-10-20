@@ -92,7 +92,7 @@ class DryRunTests(unittest.TestCase):
         self.assertEqual(proposal['outputs'][0]['dvd_title'],1)
         self.assertEqual(proposal['outputs'][0]['episode']['title'],'Die 37er')
         self.assertEqual(proposal['outputs'][0]['destination'],
-                         '/local-ssd/completed/tv/Star Trek Voyager/Season 02/Star Trek Voyager S02E01 - Die 37er - German DVD split-season release.mkv')
+            '/local-ssd/completed/tv/Star Trek Voyager/Season 02/Star Trek Voyager S02E01 - Die 37er.mkv')
         self.assertEqual(proposal['outputs'][0]['destination_kind'],'would be created')
         self.assertEqual(proposal['outputs'][0]['audio_streams'][0]['language'],'eng')
 
