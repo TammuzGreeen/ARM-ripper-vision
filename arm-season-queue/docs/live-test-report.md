@@ -16,7 +16,11 @@ read-only `/dev/sr0` tray monitor and `/dev/video0` camera were ready; the
 physical tray was observed closed, the camera was Automatic, and no ARM job was
 current. `DRY_RUN_ONLY=false`, local beta enabled, FileFlows disabled, and ARM's
 global ripping pause remained enabled (`ripping_enabled=false`). MakeMKV's
-selection setting is `+sel:all`. The GUI exposes explicit per-job start and
+selection setting is `+sel:all`. The deployed ARM source was inspected: its
+`POST /jobs/{job_id}/start` endpoint sets `manual_start` for the waiting disc
+worker, and the worker's global-pause wait exits on that explicit signal. Thus
+ARM global pause does not permanently block the queue's authorized per-job
+start path. The GUI exposes that explicit start and
 correct/incorrect/unassessed review controls; no new per-job start was issued
 during preparation.
 
