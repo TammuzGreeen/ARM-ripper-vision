@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -17,6 +18,28 @@ from .formats import Masterlist
 from .handover import beneath
 from .vision import VisionError
 from .state import encode
+
+
+def current_workflow_stage(snapshot, camera_state, *, ttl, now=None):
+    """Choose a live workflow stage without promoting completed history."""
+    now=time.time() if now is None else now
+    stage=camera_state.get('preparation_stage')
+    active_states={'reserved','starting','ripping','validating','awaiting_review','needs_attention'}
+    active=[r for r in snapshot.get('reservations',[])
+            if r.get('workflow')=='local-beta-v1' and r.get('state') in active_states]
+    if active:
+        latest=active[0]
+        if latest.get('state') in ('awaiting_review','needs_attention'):
+            return 'awaiting_review'
+        if latest.get('state') in ('starting','ripping','validating'):
+            return 'ripping'
+        return 'recognising_scanning'
+    if any(e.get('job') is None and e.get('status') in ('processing','ready')
+           and e.get('body',{}).get('tray_cycle')
+           and now-float(e.get('created') or 0)<ttl
+           for e in snapshot.get('events',[])):
+        return 'recognising_scanning'
+    return stage
 
 
 def create_app(settings=None, start_workers=True):
@@ -102,20 +125,7 @@ def create_app(settings=None, start_workers=True):
     def state():
         snapshot=controller.snapshot()
         camera_state=camera.snapshot()
-        stage=camera_state.get('preparation_stage')
-        active=[r for r in snapshot.get('reservations',[]) if r.get('workflow')=='local-beta-v1'
-                and r.get('state') not in ('failed','cancelled')]
-        if active:
-            latest=active[0]
-            if latest.get('state') in ('awaiting_review','reviewed','accepted','needs_attention'):
-                stage='awaiting_review'
-            elif latest.get('state') in ('starting','ripping','validating'):
-                stage='ripping'
-            else:
-                stage='recognising_scanning'
-        elif any(e.get('status') in ('processing','ready') and e.get('body',{}).get('tray_cycle')
-                 for e in snapshot.get('events',[])):
-            stage='recognising_scanning'
+        stage=current_workflow_stage(snapshot,camera_state,ttl=settings.ttl)
         return dict(snapshot,camera=camera_state,workflow_stage=stage)
 
     @app.get('/api/events')

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from app.arm import ARM
 from app.config import Settings
 from app.controller import Controller
-from app.main import create_app
+from app.main import create_app, current_workflow_stage
 from app.state import Store, encode
 from app.formats import arm_output_path, output_destination
 from app.ordinal import infer_ordinal_mapping
@@ -27,7 +27,17 @@ class LocalBetaTests(unittest.TestCase):
             'working_identification':{'series_display':'Example Series','season':1,'episodes':[1,2],
                                       'disc_format':['dvd']},
             'field_combinations':{'episodes':{'classification':'corroborated'},
-                                  'season':{'classification':'single-source'}}}}
+                                   'season':{'classification':'single-source'}}}}
+
+    def test_current_gui_stage_ignores_completed_reservations_and_stale_events(self):
+        camera={'preparation_stage':'tray_closed'}
+        snapshot={'reservations':[{'workflow':'local-beta-v1','state':'accepted','job':5}],
+                  'events':[{'status':'ready','created':1,'body':{'tray_cycle':{'tray_cycle_id':'old'}}}]}
+        self.assertEqual(current_workflow_stage(snapshot,camera,ttl=60,now=1000),'tray_closed')
+        snapshot['events']=[{'status':'processing','created':995,'body':{'tray_cycle':{'tray_cycle_id':'new'}}}]
+        self.assertEqual(current_workflow_stage(snapshot,camera,ttl=60,now=1000),'recognising_scanning')
+        snapshot['reservations']=[{'workflow':'local-beta-v1','state':'awaiting_review','job':6}]
+        self.assertEqual(current_workflow_stage(snapshot,camera,ttl=60,now=1000),'awaiting_review')
 
     def test_ordinal_mapping_is_disabled_by_default_and_requires_local_beta_to_enable(self):
         self.assertFalse(Settings().auto_ordinal_mapping)
