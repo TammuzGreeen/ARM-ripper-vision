@@ -112,6 +112,9 @@ class LocalBetaTests(unittest.TestCase):
         self.assertTrue(active.auto_ordinal_mapping)
         self.assertTrue(active.tray_monitor_enabled)
         self.assertTrue(active.tray_close_enabled)
+        with self.assertRaisesRegex(ValueError,'must match configured ARM_DRIVE'):
+            Settings(local_beta=True,dry_run_only=False,fileflows_enabled=False,password='test',
+                tray_monitor_enabled=True,tray_monitor_device='/dev/sr1',drive='/dev/sr0')
 
     def test_arm_tray_action_uses_explicit_arm_api_method(self):
         arm=ARM.__new__(ARM);arm.held=Mock();arm.call=Mock(return_value={'success':True})

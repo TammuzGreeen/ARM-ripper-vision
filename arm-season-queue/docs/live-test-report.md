@@ -22,6 +22,22 @@ follow-up is to evaluate an API-based GPT vision fallback; the exact served
 model ID/configuration must be verified then. It is not implemented here and no
 images were sent externally for this task.
 
+### Local beta deployment status
+
+The source-identifiable queue release `arm-season-queue:local-beta-tray-5d4ee49`
+was deployed using the durable private beta overlay. The running container
+reported ordinal mapping and read-only tray monitoring enabled, `ARM_DRIVE` and
+`TRAY_MONITOR_DEVICE` both `/dev/sr0`, ARM-mediated close enabled, FileFlows off,
+and `DRY_RUN_ONLY=false`. Docker granted the helper read-only device access; a
+read-only ioctl returned the closed/no-disc state. Queue preflight and ARM
+source/API checks passed against ARM Neu 19.1.0 with the verified source
+reference SHA. ARM global ripping remains paused (`ripping_enabled=false`), the
+existing beta batch is running, and the queue's explicit per-job start control
+is available. The tray was closed and empty at deployment; no setup disc was
+processed. This establishes software deployment only. **Physical manual-open
+detection, empty-view calibration, disc capture, ARM close/prescan, actual rip,
+and ARM ejection remain pending the operator's supervised live test.**
+
 ## Opt-in ordinal mapping implementation (2026-10-20)
 
 The current local-beta implementation adds `ARM_AUTO_ORDINAL_MAPPING`, default

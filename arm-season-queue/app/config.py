@@ -97,6 +97,8 @@ class Settings:
             raise ValueError('Tray monitoring requires LOCAL_BETA_ENABLED=true')
         if self.tray_monitor_enabled and not self.tray_monitor_device.startswith('/'):
             raise ValueError('TRAY_MONITOR_DEVICE must be an absolute path')
+        if self.tray_monitor_enabled and self.tray_monitor_device != self.drive:
+            raise ValueError('TRAY_MONITOR_DEVICE must match configured ARM_DRIVE')
         if (not 0.1 <= self.tray_state_poll_seconds <= 5
                 or not 2 <= self.tray_state_debounce_samples <= 10):
             raise ValueError('Tray polling/debounce configuration is outside safe bounds')
