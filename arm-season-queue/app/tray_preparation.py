@@ -42,6 +42,7 @@ class TrayPreparation:
         self.calibration_frames = []
         self.stable_empty_frames = 0
         self.event_id = None
+        self.manual_empty_reference = None
         self._load()
 
     def _load(self):
@@ -138,6 +139,7 @@ class TrayPreparation:
             self.cycle_id = str(uuid4())
             self.cycle_started_at = time.time()
             self.event_id = None
+            self.manual_empty_reference = None
             self.calibration_frames = []
             self.previous_frame = None
             self.stable_empty_frames = 0
@@ -194,6 +196,20 @@ class TrayPreparation:
             return self.snapshot()
 
         if self.stage == 'calibrating_empty_tray':
+            if self.manual_empty_reference is not None:
+                confirmed_scene_unchanged=self.scene_matches(
+                    frame,self.manual_empty_reference,threshold=35,fraction=0.20)
+                if not confirmed_scene_unchanged:
+                    self.stage = 'early_disc_during_calibration'
+                    self.message = ('Scene changed after the operator confirmed the empty view; '
+                                    'remove the object, then use Reset empty view again')
+                    self.calibration_frames = []
+                    self.manual_empty_reference = None
+                    self._save()
+                    return self.snapshot()
+                # An explicit empty-view confirmation disambiguates the tray's
+                # own molded circles; a later scene change still aborts this cycle.
+                disc_like=False
             if disc_like:
                 self.stage = 'early_disc_during_calibration'
                 self.message = ('Disc-like object detected before empty calibration completed; remove it, '
@@ -244,10 +260,10 @@ class TrayPreparation:
             if os.path.exists(name):
                 os.unlink(name)
 
-    def reset_empty_view(self, frame, *, disc_like=False, now=None):
+    def reset_empty_view(self, frame, *, disc_like=False, user_confirmed_empty=False, now=None):
         if self.tray_state != 'open':
             raise ValueError('Reset empty view requires the tray to be reliably open')
-        if disc_like:
+        if disc_like and not user_confirmed_empty:
             raise ValueError('A disc-like object is visible; remove it before resetting the empty view')
         if not self.cycle_id:
             self.cycle_id=str(uuid4())
@@ -255,6 +271,7 @@ class TrayPreparation:
         self._start_calibration(time.monotonic() if now is None else now,
                                 'Manual Reset empty view requested; waiting for a stable empty scene')
         self.previous_frame = frame.copy()
+        self.manual_empty_reference = frame.copy() if user_confirmed_empty else None
 
     def set_stage(self, stage, message=None, event_id=None):
         if stage not in self.STAGES:
