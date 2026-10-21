@@ -13,7 +13,7 @@ opts in to ordinal mapping, read-only monitoring and ARM-mediated close; global
 ARM pause remains the gate and the queue's explicit per-job start path remains
 the only start mechanism. FileFlows and external image processing remain off.
 
-The Python 3.12 Docker test image passed the active suite: **209 tests passed**.
+The Python 3.12 Docker test image passed the active suite: **210 tests passed**.
 This includes state/debounce/calibration/restart/repeated-callback regressions
 and the generated-media integration test. This is software validation only;
 it does not qualify the camera's disc detector, physical tray transitions,
@@ -24,7 +24,7 @@ images were sent externally for this task.
 
 ### Local beta deployment status
 
-The source-identifiable queue release `arm-season-queue:local-beta-tray-fbc5689`
+The source-identifiable queue release `arm-season-queue:local-beta-tray-a2bff3d`
 was deployed using the durable private beta overlay. The running container
 reported ordinal mapping and read-only tray monitoring enabled, `ARM_DRIVE` and
 `TRAY_MONITOR_DEVICE` both `/dev/sr0`, ARM-mediated close enabled, FileFlows off,
