@@ -1,5 +1,35 @@
 # Verification and qualification
 
+## Fresh unrestricted beta preparation (2026-10-21)
+
+The stale Voyager-season batch was canceled through the queue's supported
+workflow; its batch record, job 5, evidence, files, and assessments were retained.
+ARM reported job 5 terminal (`success`), with no current drive job. A new,
+independent unrestricted session is active with a null masterlist snapshot and
+no starting-disc/entry cursor. The previous reservation remains in history and
+is not reused by the new session.
+
+The correction was deployed as
+`arm-season-queue:local-beta-unrestricted-7cacbd4`. Runtime preflight passed:
+ARM Neu 19.1.0 source/API profile, both configured Ollama models, storage,
+read-only `/dev/sr0` tray monitor and `/dev/video0` camera were ready; the
+physical tray was observed closed, the camera was Automatic, and no ARM job was
+current. `DRY_RUN_ONLY=false`, local beta enabled, FileFlows disabled, and ARM's
+global ripping pause remained enabled (`ripping_enabled=false`). MakeMKV's
+selection setting is `+sel:all`. The GUI exposes explicit per-job start and
+correct/incorrect/unassessed review controls; no new per-job start was issued
+during preparation.
+
+The active Docker suite passed **218 tests**, including generated-media
+integration and new regressions for different consecutive series, no reference
+match, fresh-session isolation, empty-tray calibration, and post-eject tray
+handling. The push was integrated with the concurrent `origin/main` update and
+completed at commit `7cacbd4`. These are software/deployment checks only. No new
+disc was presented and no new scan, rip, or ejection occurred in this
+preparation phase; physical camera opening, automatic baseline capture, disc
+recognition, ARM prescan, per-job start, ripped files, and ARM-owned ejection
+remain unqualified until the supervised unrestricted test.
+
 ## Read-only tray monitoring and automatic empty-view preparation (2026-10-21)
 
 The implementation now polls Linux `CDROM_DRIVE_STATUS` on only the configured
