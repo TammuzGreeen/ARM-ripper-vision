@@ -64,6 +64,18 @@ class TrayMonitorTests(unittest.TestCase):
             prep.observe_frame(empty,stable=True,now=1.3)
             self.assertEqual(prep.stage,'ready_for_disc')
 
+    def test_startup_monitor_recovery_with_saved_reference_validates_open_scene(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prep=TrayPreparation(tmp,'/dev/arm-monitor')
+            empty=self.frame(20)
+            prep._save_background(empty.astype(np.uint8))
+            prep.background=empty.copy()
+            prep.tray_observation('unknown',now=0)
+            prep.tray_observation('open',initial=True,now=1)
+            self.assertEqual(prep.stage,'calibrating_empty_tray')
+            prep.observe_frame(self.frame(220),stable=True,now=1.2)
+            self.assertEqual(prep.stage,'early_disc_during_calibration')
+
     def test_open_tray_recovery_never_calibrates_disc_scene_as_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
             prep=TrayPreparation(tmp,'/dev/arm-monitor')

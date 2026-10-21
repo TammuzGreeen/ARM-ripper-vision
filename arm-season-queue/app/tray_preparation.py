@@ -125,7 +125,8 @@ class TrayPreparation:
             self._save()
             return
 
-        if state == 'open' and self.stage == 'tray_status_unavailable' and not initial:
+        if (state == 'open' and self.stage == 'tray_status_unavailable'
+                and (self.background is not None or not initial)):
             # An ioctl outage can hide the physical open transition. Recover only
             # by validating against the already-frozen empty reference; never
             # seed an empty baseline from an unobserved open-tray scene.
