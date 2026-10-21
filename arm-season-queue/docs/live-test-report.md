@@ -24,7 +24,7 @@ images were sent externally for this task.
 
 ### Local beta deployment status
 
-The source-identifiable queue release `arm-season-queue:local-beta-tray-5d4ee49`
+The source-identifiable queue release `arm-season-queue:local-beta-tray-fbc5689`
 was deployed using the durable private beta overlay. The running container
 reported ordinal mapping and read-only tray monitoring enabled, `ARM_DRIVE` and
 `TRAY_MONITOR_DEVICE` both `/dev/sr0`, ARM-mediated close enabled, FileFlows off,
