@@ -16,35 +16,85 @@ reservation before it configures or starts a job.
   with a reason.
 - Otherwise, every ARM-prescanned source title with a valid nonzero duration
   in the supported per-title range is selected. No title is silently dropped;
-  invalid technical source data fails the job visibly. No episode identity or
-  ordering is inferred from title count, duration, or position.
+  invalid technical source data fails the job visibly.
+- By default, unmapped titles remain provisional. The explicit opt-in
+  `ARM_AUTO_ORDINAL_MAPPING=true` permits sequential assignments only when
+  recognition passes its field-evidence gate, the season and contiguous printed
+  episode range are complete, and the count of ARM titles at least 30 seconds
+  long equals the episode count. Titles shorter than 30 seconds remain
+  provisional and do not shift the sequence. This duration threshold is a
+  heuristic, not MakeMKV proof that a title is an episode.
+- Ordinal assignments are always labeled `inferred_unverified`; the source
+  MakeMKV IDs, title scan metadata, observed identity/range, algorithm, counts,
+  and warning are retained. Equal counts do not prove episode identity or order.
+  Inspect inferred filenames against the retained disc images and use review
+  corrections to fix them. A compatible approved mapping takes precedence; any
+  existing match prevents ordinal inference. The feature never writes to a
+  masterlist.
+- The owner-confirmed ordinal convention is scoped to one unique DVD episode
+  source per printed episode. ARM MakeMKV IDs are sorted as actual source IDs
+  (which restart per disc); an independent one-based ordinal position records
+  their order in the disc's ordered episode list. DVD title numbers remain
+  unknown unless ARM explicitly supplies them and are never computed as
+  MakeMKV ID + 1. A Blu-ray/playlist, explicit angle ambiguity, duplicate-looking
+  titles, long extras/count mismatch or incomplete evidence stays provisional.
 - Unmapped titles receive a unique `Source Title NNN - PROVISIONAL` name in a
   job-specific output directory. The output remains local and awaits review.
 - Review corrections are append-only in the per-job feedback history. Filename
   updates are restricted to the job directory, reject collisions, use a
   same-directory two-phase rename, and preserve the prior name and mapping.
+- Checking “Episode mapping” during review records the operator's verification;
+  without that review, inferred assignments remain unverified.
 - Local beta validation checks that the output exists, has a video stream,
   duration is consistent with ARM's scan, and decodes. Where no approved source
   inventory exists, the report explicitly says inventory is unknown rather than
   claiming it matched.
 
-## ARM-owned tray cycle
+## Automatic tray preparation
 
-With `LOCAL_BETA_TRAY_CYCLE_ENABLED=true`, batch start/resume opens the configured
-ARM tray only when ARM reports no current job and the global pause is held. The
-camera persists the original snapshot first; only then does the companion use
-ARM's explicit `close` API method, which starts ARM's drive rescan. Recognition
-continues from the retained image while ARM scans. After terminal success (and
-local validation) or terminal ARM failure, the companion rechecks the exact
-job/drive association and asks ARM to open the tray. `toggle` is never used.
-Tray action intent/result is persisted and visible in the GUI. A failed or
-ambiguous API outcome is not blindly retried.
+`TRAY_MONITOR_ENABLED=true` enables a read-only `CDROM_DRIVE_STATUS` ioctl on
+only `TRAY_MONITOR_DEVICE`, which must be the configured ARM drive. The queue
+container receives that block device with read-only device permission and the
+host optical group. It does not read sectors, close/eject the drive, or launch
+a scan to learn state. `CDS_NO_DISC` is a **closed** tray with no medium, not an
+open tray. Unavailable, moving and unrecognized states are reported as unknown;
+three consistent samples (0.5 seconds apart by default) debounce transitions.
 
-The first tray-cycle setup requires an empty open-tray camera view calibration.
-The physical camera framing and hand-clear timing must be checked on the first
-disc; software cannot prove that a hand has left the tray from the snapshot
-alone. Do not place a hand in the mechanism when automatic close is enabled.
-The installed ARM API is the only code that controls the optical tray.
+In Automatic camera mode, a newly observed closed-to-open transition starts a
+preparation cycle. The helper settles for two seconds, checks for a disc-like
+circular object, then collects 12 stable frames before freezing a private empty
+reference. The GUI then says **Ready—place disc**; media presentation is
+captured automatically. The empty reference is never refreshed while waiting
+for media. If a prior baseline exists, an opening first has to match it stably;
+after ARM AUTO_EJECT this prevents a completed disc left in the tray from being
+mistaken for an empty tray. Removal is followed by a one-time baseline refresh.
+The tray cycle and baseline persist across restarts. An already-open tray at
+startup is not treated as a fresh opening unless a reliable persisted open
+cycle exists; otherwise the GUI asks for empty-view preparation. Early placement,
+timeouts, missing camera and unknown tray status have explicit recovery messages
+and **Reset empty view** is available while the tray is reliably open.
+
+For a fresh automatic capture, the original and cropped frames are persisted
+and flushed before the companion invokes ARM's explicit `close` API. That ARM
+operation owns closure and starts ARM's prescan; recognition proceeds from the
+retained frames while ARM scans. Only after recognition and the matching ARM
+prescan are ready does the queue configure and explicitly start the reserved
+per-job rip. Global ARM ripping pause stays enabled; the per-job start is the
+only start path. After success, ARM AUTO_EJECT remains the sole automatic eject
+owner. The GUI shows tray state and the current preparation/rip/review stage.
+
+Do not place a hand in the mechanism when automatic close is enabled. Verify
+camera framing and the disc-removal detector on the first physical cycle; these
+are software safeguards, not proof of physical correctness. `LOCAL_BETA_TRAY_CYCLE_ENABLED`
+does not issue tray-open commands; manual opening is detected by the read-only
+monitor.
+
+## Follow-up (not implemented)
+
+Evaluate an optional GPT vision fallback through the API in a separate task.
+Verify the exact available model ID and configuration at that time. This
+follow-up adds no API dependency or external image processing to the current
+deployment; current images remain local and FileFlows stays disabled.
 
 ## Review and feedback
 

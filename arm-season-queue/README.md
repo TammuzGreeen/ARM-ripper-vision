@@ -2,7 +2,7 @@
 
 A local-first USB-camera companion for season-based ARM Neu ripping. Masterlists are optional recognition and mapping aids: you may present an unfamiliar disc without selecting a target first. Recognition observations, descriptive reference metadata, confirmed technical mappings, current-disc identity and plan executability are tracked separately. No-match is a normal reviewable result; the camera never creates or updates masterlists. ARM and FileFlows remain separate applications.
 
-**Implementation status:** application, local webcam/OCR pipeline, browser interface, transactional queue, source-specific ARM adapter, Docker/TrueNAS example, and durable FileFlows handover helper are included. **This has not been deployed or tested against a physical webcam, ARM installation, or FileFlows installation.** No direct TrueNAS access was used. See [test report](docs/live-test-report.md).
+**Implementation status:** application, local webcam/OCR pipeline, browser interface, transactional queue, source-specific ARM adapter, Docker/TrueNAS example, and durable FileFlows handover helper are included. A source-identifiable local-beta deployment has been used for queue/ARM software checks; this tray-monitor and automatic-calibration revision still requires deployment and a supervised physical-camera/drive test. FileFlows is separate and unqualified. No direct TrueNAS access was used. See [test report](docs/live-test-report.md).
 
 The adapter currently targets inspected ARM Neu **19.1.0**, reference commit `f6ec2e3fd47cf951e89094e0a9d6999ab94d781f`. A version string alone is insufficient: startup of a batch requires a checked source profile and compatible live API/settings. An unknown deployment remains blocked from automatic starting. Other ARM versions need their own inspected adapter profile; changing an environment variable does not make an incompatible API supported.
 
@@ -140,9 +140,12 @@ outputs when no compatible technical masterlist mapping exists, and leaves
 validated outputs in local storage for authenticated human review. Configure
 `LOCAL_BETA_ENABLED=true`, `DRY_RUN_ONLY=false`, and
 `FILEFLOWS_ENABLED=false` together; the app rejects an inconsistent beta
-configuration. Unmapped sources are not assigned episode numbers. The normal
-source policy is every technically selectable prescanned title, with exclusions
-recorded only when a compatible approved mapping explicitly selects a subset.
+configuration. Unmapped sources remain provisional by default. Operators may
+explicitly enable `ARM_AUTO_ORDINAL_MAPPING=true` for count-gated, inferred and
+unverified sequential assignments; matching counts are not proof of episode
+identity. See the safeguards and correction workflow in local-beta.md. The
+normal source policy is every technically selectable prescanned title, with
+exclusions recorded only when a compatible approved mapping explicitly selects a subset.
 This mode is a small-batch beta, not a claim of physical qualification.
 
 Example host invocation (adjust local paths/container names; never store the

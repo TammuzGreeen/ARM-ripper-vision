@@ -6,6 +6,14 @@ This update makes the prepared camera companion the default Docker runtime. It d
 2. Create a fresh `.env` from the new example; old `ARV_*` settings do not configure this runtime. Set the backend `ARM_URL`, private queue password, device/group and paths. The listener changes from the earlier 8099 to configurable 8080 by default, bound to loopback.
 3. Use a separate new state directory. Do not point it at the old helper’s SQLite database. Root Compose now uses service `queue`; the optional `publisher` tool is not a replacement FileFlows server.
 4. Manually translate each desired series/season/edition into the documented schema. The old multi-season YAML remains preserved in `examples/masterlists/`. The current sample is under `arm-season-queue/examples/`. Do not infer DVD title numbers from old `source_title` values. Supply the actual mappings and source inventory yourself.
+
+The active runtime keeps unknown episode assignments provisional by default.
+Its separate, explicitly enabled `ARM_AUTO_ORDINAL_MAPPING=true` option can
+create inferred/unverified sequential episode assignments only when complete
+recognized episode-range metadata and the eligible ARM title count agree.
+Count equality is not proof of identity; inspect and correct those mappings in
+the per-job review. This option does not alter masterlists or infer DVD title
+numbers from legacy data.
 5. Masterlists are optional recognition and mapping aids. An unfamiliar disc may be recognized, scanned and planned without selecting one; descriptive drafts can supply candidate metadata but never technical instructions. Recognition cannot create entries or fill missing mappings. Job-specific human corrections do not modify reusable lists.
 6. Verify deployed ARM source/API, configure its per-title lossless settings and persistent global pause, and qualify the camera and one staging job. The new controller never automatically releases global pause on completion/shutdown.
 

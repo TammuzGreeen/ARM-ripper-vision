@@ -25,8 +25,12 @@ def create_app(settings=None, start_workers=True):
         raise ValueError('Set a nonempty QUEUE_PASSWORD before starting the service')
     controller = Controller(settings)
     camera = Camera(settings,controller.begin_event,controller.recognition_done,controller.release_event,
-                    controller.masters,controller.close_tray_after_snapshot)
+                    controller.masters,controller.close_tray_after_snapshot,
+                    controller.annotate_event_tray_cycle)
     controller.on_tray_open=camera.tray_opened
+    controller.on_arm_ejected=camera.note_arm_ejected
+    controller.get_tray_status=camera.snapshot
+    camera.on_event_invalidated=controller.invalidate_camera_event
 
     @asynccontextmanager
     async def lifespan(app):
@@ -96,7 +100,23 @@ def create_app(settings=None, start_workers=True):
 
     @app.get('/api/state')
     def state():
-        return dict(controller.snapshot(),camera=camera.snapshot())
+        snapshot=controller.snapshot()
+        camera_state=camera.snapshot()
+        stage=camera_state.get('preparation_stage')
+        active=[r for r in snapshot.get('reservations',[]) if r.get('workflow')=='local-beta-v1'
+                and r.get('state') not in ('failed','cancelled')]
+        if active:
+            latest=active[0]
+            if latest.get('state') in ('awaiting_review','reviewed','accepted','needs_attention'):
+                stage='awaiting_review'
+            elif latest.get('state') in ('starting','ripping','validating'):
+                stage='ripping'
+            else:
+                stage='recognising_scanning'
+        elif any(e.get('status') in ('processing','ready') and e.get('body',{}).get('tray_cycle')
+                 for e in snapshot.get('events',[])):
+            stage='recognising_scanning'
+        return dict(snapshot,camera=camera_state,workflow_stage=stage)
 
     @app.get('/api/events')
     def recognition_events(offset:int=0,limit:int=20):

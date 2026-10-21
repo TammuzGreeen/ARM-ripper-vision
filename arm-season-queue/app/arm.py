@@ -155,7 +155,7 @@ class ARM:
         return preview
 
     def configure_provisional(self, job, identity, mapping):
-        """Configure every technically valid ARM source with collision-safe review names."""
+        """Configure every source with provisional or explicitly inferred job names."""
         self.held()
         detail = self.detail(job)
         if detail['job']['status'] != 'manual_paused' or detail['job'].get('manual_start'):
@@ -178,15 +178,21 @@ class ARM:
         self.call('POST', f'/jobs/{job}/multi-title', {'enabled': True})
         for track in detail['tracks']:
             item = selected[track['track_id']]
+            inferred_episode=item.get('episode') if item.get('mapping_status')=='inferred_unverified' else None
+            if item.get('episode') and not inferred_episode:
+                raise ValueError('Unverified local-beta configuration cannot apply a verified episode mapping')
+            episode_number=str(inferred_episode['number']) if inferred_episode else '0'
             self.call('PATCH', f"/jobs/{job}/tracks/{track['track_id']}", {
-                'enabled': True, 'episode_number': '0',
+                'enabled': True, 'episode_number': episode_number,
                 'episode_name': item['content_name'], 'custom_filename': item['basename'],
             })
         reread = self.detail(job)
         for track in reread['tracks']:
             item = selected[track['track_id']]
+            inferred_episode=item.get('episode') if item.get('mapping_status')=='inferred_unverified' else None
+            expected_episode_number=str(inferred_episode['number']) if inferred_episode else '0'
             if (not track.get('enabled') or track.get('custom_filename') != item['basename']
-                    or str(track.get('episode_number')) != '0'):
+                    or str(track.get('episode_number')) != expected_episode_number):
                 raise ValueError('ARM did not retain provisional title selection/naming')
         preview = self.call('GET', f'/jobs/{job}/naming-preview')
         by_id = {int(t['track_number']): t for t in preview['tracks']}

@@ -23,10 +23,11 @@
        <label>Episode name <input data-field="episode_name" value="${esc(ep.episode_name??o.episode?.title??'')}" data-original="${esc(ep.episode_name??o.episode?.title??'')}"></label>
        <label>Version <input data-field="version" value="${esc(ep.version??o.version??'')}" data-original="${esc(ep.version??o.version??'')}"></label>
        <label>Filename <input data-field="filename" data-original="${esc(o.actual_filename)}" value="${esc(o.actual_filename)}"></label>
-       <p class="muted">Source ID ${esc(o.makemkv_id)}; mapping: ${esc(o.mapping_evidence||'unavailable')}; provisional: ${o.provisional?'yes':'no'}</p></fieldset>`;
+        <p class="muted">Source ID ${esc(o.makemkv_id)}; mapping status: <strong>${esc(o.mapping_status||'unknown')}</strong>; ${o.verified?'verified':'not verified'}; evidence: ${esc(o.mapping_evidence||'unavailable')}; provisional: ${o.provisional?'yes':'no'}</p></fieldset>`;
     }).join('');
     return `<article class="beta-review-card"><h3>Job ${esc(item.job)} · ${esc(item.state)} · ${esc(review.status||'')}</h3>
-      <p>Disc: ${esc(review.observed_label||item.observed_label||'unlabelled')} · Insertion: ${esc(item.event)} · Mapping: ${esc(review.mapping_source||item.workflow||'unknown')}</p>
+       <p>Disc: ${esc(review.observed_label||item.observed_label||'unlabelled')} · Insertion: ${esc(item.event)} · Mapping: ${esc(review.mapping_source||item.workflow||'unknown')}</p>
+       ${review.ordinal_mapping?`<details open class="warning"><summary>INFERRED · UNVERIFIED ordinal mapping</summary><p>${esc(review.ordinal_mapping.warning)} Verify each filename against the retained disc images. Count equality is not proof.</p><pre>${esc(JSON.stringify(review.ordinal_mapping,null,2))}</pre></details>`:''}
       ${item.error?`<p class="error">Job error: ${esc(item.error)}</p>`:''}
       ${(review.warnings||[]).length?`<aside class="warning"><strong>Warnings / assumptions</strong><ul>${review.warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul></aside>`:''}
       ${review.arm_progress?`<details><summary>Last ARM progress update · ${esc(review.arm_progress.status)} · ${esc(review.arm_progress.updated_at)}</summary><pre>${esc(JSON.stringify(review.arm_progress.tracks,null,2))}</pre></details>`:''}
@@ -35,7 +36,7 @@
       <details><summary>Scan, selection and exclusions</summary><pre>${esc(JSON.stringify({source_titles:scan,selection_policy:review.selection_policy||item.workflow,selected:review.selected_titles||item.mapping,excluded:review.excluded_titles||[],masterlist:review.masterlist||item.masterlist,provenance:review.masterlist_provenance},null,2))}</pre></details>
       ${identityForm}<div class="beta-title-list">${titleRows}</div>
       <label>Review notes <textarea class="beta-notes" rows="2">${esc(review.feedback?.notes||'')}</textarea></label>
-      <p>Reviewed fields: <label><input type="checkbox" data-reviewed="identity">Identity</label> <label><input type="checkbox" data-reviewed="episodes">Episode mapping</label> <label><input type="checkbox" data-reviewed="files">Filenames/files</label> <label><input type="checkbox" data-reviewed="selection">Selection/exclusions</label></p>
+       <p>Reviewed fields: <label><input type="checkbox" data-reviewed="identity">Identity</label> <label><input type="checkbox" data-reviewed="episodes">Episode mapping</label> <label><input type="checkbox" data-reviewed="files">Filenames/files</label> <label><input type="checkbox" data-reviewed="selection">Selection/exclusions</label></p><p class="muted">For inferred mappings, mark Episode mapping reviewed only after checking the track filenames against the retained disc images. Accepting without that check leaves mappings unverified.</p>
       <div class="buttons"><button data-review="accept">Accept as correct</button><button data-review="save_reviewed">Save corrections and mark reviewed</button><button data-review="needs_attention">Needs attention / leave unreviewed</button></div><p class="beta-result" role="status"></p></article>`;
   }
   async function load(){

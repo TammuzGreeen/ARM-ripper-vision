@@ -11,6 +11,8 @@ import numpy as np
 from .recognition import consensus, ocr
 from .agreement import PRIMARY_MODEL, recognize as recognize_agreement
 from .vision import identify, VisionError, transcribe_visible_text
+from .tray_monitor import TrayMonitor
+from .tray_preparation import TrayPreparation
 
 
 class PresentationGate:
@@ -41,11 +43,14 @@ class PresentationGate:
 
 class Camera:
     def __init__(self, settings, on_begin, on_result, on_release, get_masters=None,
-                 on_snapshot_saved=None):
+                 on_snapshot_saved=None, on_event_context=None, on_arm_ejected=None):
         self.s = settings
         self.on_begin, self.on_result, self.on_release = on_begin, on_result, on_release
         self.get_masters = get_masters or (lambda: [])
         self.on_snapshot_saved = on_snapshot_saved or (lambda event, refs: None)
+        self.on_event_context = on_event_context or (lambda event, context: None)
+        self.on_arm_ejected = on_arm_ejected or (lambda job: None)
+        self.on_event_invalidated = lambda event, reason: None
         self.lock = threading.RLock()
         self.stop = threading.Event()
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='local-ocr')
@@ -55,7 +60,15 @@ class Camera:
         self.full_frame = None
         self.frame_at = 0
         self.mode = settings.camera_mode or ('auto' if settings.arm_url else 'manual')
-        self.background = None
+        self.tray_monitor = (TrayMonitor(settings.tray_monitor_device,
+                            interval=settings.tray_state_poll_seconds,
+                            stable_samples=settings.tray_state_debounce_samples)
+                             if getattr(settings, 'tray_monitor_enabled', False) else None)
+        self.preparation = (TrayPreparation(settings.state, settings.tray_monitor_device,
+                           settle_seconds=settings.tray_calibration_settle_seconds,
+                           calibration_timeout=settings.tray_calibration_timeout_seconds)
+                            if self.tray_monitor else None)
+        self.background = self.preparation.background if self.preparation else None
         self.previous = None
         self.gate = PresentationGate()
         self.event = None
@@ -65,14 +78,30 @@ class Camera:
         self.best_fallback = None
         self.best_fallback_full = None
         self.best_fallback_sharpness = -1.0
+        self.last_disc_check = 0.0
+        self.disc_candidate = False
         self.short_transcriptions = {}
         self.diagnostic_busy = False
         self.status = {'connected':False, 'message':'Connecting to camera', 'calibrated':False,
                        'mode':self.mode, 'rotation_degrees':settings.camera_rotation}
+        if self.preparation:
+            self.status.update(self.preparation.snapshot())
 
     def snapshot(self):
         with self.lock:
-            return dict(self.status, busy=self.diagnostic_busy or bool(self.future and not self.future.done()), backend=self.s.recognition_backend)
+            data=dict(self.status, busy=self.diagnostic_busy or bool(self.future and not self.future.done()), backend=self.s.recognition_backend)
+            if self.preparation:
+                data.update(self.preparation.snapshot())
+            return data
+
+    @staticmethod
+    def disc_like(gray):
+        """Conservative local circular-object guard for first-time empty calibration."""
+        if gray is None or gray.shape != (100,160):
+            return False
+        circles=cv2.HoughCircles(gray.astype('uint8'),cv2.HOUGH_GRADIENT,dp=1.2,minDist=28,
+                                 param1=90,param2=30,minRadius=18,maxRadius=48)
+        return circles is not None and circles.shape[1] > 0
 
     def capture_deadline_reached(self, now=None):
         now = time.monotonic() if now is None else now
@@ -232,12 +261,20 @@ class Camera:
         self.stop.set()
         self.thread.join(timeout=3)
         self.pool.shutdown(wait=False, cancel_futures=True)
+        if self.tray_monitor:
+            self.tray_monitor.close()
 
     def calibrate(self):
         with self.lock:
             self.require_frame()
             if self.diagnostic_busy or (self.future and not self.future.done()):
                 raise ValueError('Wait for recognition to finish before marking the view empty')
+            if self.preparation:
+                gray=self.small(self.frame)
+                self.preparation.reset_empty_view(gray,disc_like=self.disc_like(gray))
+                self.background=self.preparation.background
+                self.status.update(self.preparation.snapshot())
+                return
             # Explicit empty confirmation recovers even if automatic detection is latched.
             self.event = None
             self.samples = []
@@ -260,6 +297,30 @@ class Camera:
                 self.background = None
                 self.status['calibrated'] = False
                 self.status['message'] = 'Tray opened. Clear it, then calibrate the empty-tray view once.'
+
+    def note_arm_ejected(self, job):
+        with self.lock:
+            if self.preparation:
+                self.preparation.note_arm_ejected(job)
+                self.status.update(self.preparation.snapshot())
+
+    def _poll_tray_state(self, now):
+        if not self.tray_monitor or not self.preparation:
+            return
+        reading=self.tray_monitor.poll(now)
+        if (reading['state'] != self.preparation.tray_state or reading.get('transition')
+                or reading.get('initial')):
+            self.preparation.tray_observation(reading['state'],transition=reading.get('transition'),
+                                              initial=reading.get('initial',False),now=now)
+        if reading.get('transition')=='open' and (self.future is None or self.future.done()):
+            self.event=None
+            self.event_started_at=None
+            self.samples=[]
+            self.full_samples=[]
+            self.gate=PresentationGate()
+        self.status.update(self.preparation.snapshot())
+        if reading.get('error') and reading['state']=='unknown':
+            self.status['message']=reading['error']
 
     @staticmethod
     def small(frame):
@@ -305,14 +366,36 @@ class Camera:
                     sharp = cv2.Laplacian(cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY),cv2.CV_64F).var()
                     glare = float(np.mean(small>250))
                     self.status.update(sharpness=round(sharp), glare=round(glare,2))
+                    now=time.monotonic()
+                    stable = self.previous is not None and np.mean(np.abs(small-self.previous)) < 4
+                    if self.tray_monitor:
+                        self._poll_tray_state(now)
+                        if self.preparation.tray_state == 'open':
+                            if now-self.last_disc_check >= .5:
+                                self.disc_candidate=self.disc_like(small)
+                                self.last_disc_check=now
+                            self.preparation.observe_frame(small,stable=stable,
+                                                           disc_like=self.disc_candidate,now=now)
+                            self.background=self.preparation.background
+                            self.status.update(self.preparation.snapshot())
                     if self.background is None:
-                        self.status['message'] = 'Clear the view, then calibrate the empty background'
+                        self.status['message'] = (self.preparation.message if self.preparation else
+                                                  'Clear the view, then calibrate the empty background')
+                    elif (self.mode == 'auto' and self.preparation and
+                          (self.preparation.tray_state != 'open' or
+                           self.preparation.stage not in ('ready_for_disc','capturing'))):
+                        self.status['message'] = self.preparation.message
                     elif self.mode == 'auto':
                         present = np.mean(np.abs(small-self.background)>25) > .12
-                        stable = self.previous is not None and np.mean(np.abs(small-self.previous)) < 4
                         if present and self.event is None:
                             # Invalidate previous evidence on object arrival, even if blurry/unreadable.
                             self.event = self.begin('camera')
+                            if self.preparation:
+                                context={'tray_cycle_id':self.preparation.cycle_id,
+                                         'monitor_device':self.preparation.device,
+                                         'captured_at':time.time()}
+                                self.on_event_context(self.event,context)
+                                self.preparation.set_stage('capturing','Disc detected; collecting stable evidence frames',self.event)
                             self.event_started_at = time.monotonic()
                             self.samples = []
                             self.full_samples = []
@@ -329,7 +412,17 @@ class Camera:
                             self.best_fallback_sharpness = float(sharp)
                         # Release also needs to work for an object that never became sharp enough.
                         if not present and self.gate.empty>=8 and self.event:
-                            self.release(self.event)
+                            if (self.preparation and self.preparation.tray_state=='open'
+                                    and self.preparation.stage=='capturing'
+                                    and getattr(self,'submitted',False)):
+                                stale_event=self.event
+                                self.on_event_invalidated(stale_event,
+                                    'Media was removed or replaced before the helper completed its confirmed ARM tray-close request')
+                                self.preparation.set_stage('ready_for_disc',
+                                    'Capture invalidated after media removal/replacement; ready for a fresh presentation')
+                                self.status.update(self.preparation.snapshot())
+                            else:
+                                self.release(self.event)
                             if not getattr(self,'submitted',False):
                                 self.on_result(self.event, {'accepted':False,'frames':[], 'reason':'Media removed before enough sharp frames were captured'})
                                 self.samples = []
@@ -346,6 +439,8 @@ class Camera:
                                 self.samples = []
                                 self.full_samples = []
                                 self.collecting = True
+                                if self.preparation:
+                                    self.preparation.set_stage('capturing','Stable disc detected; freezing capture evidence',self.event)
                         if self.event and getattr(self,'collecting',False) and present and stable and sharp>=self.s.sharpness:
                             self.samples.append(frame.copy())
                             self.full_samples.append(self.full_frame.copy())
@@ -358,6 +453,8 @@ class Camera:
                                 self.submitted = True
                                 self.future = self.pool.submit(self.process, self.event, images, False, 'webcam', False, originals)
                                 self.status['message'] = 'Reading 3 captured frames; remove media before insertion'
+                                if self.preparation:
+                                    self.preparation.set_stage('capturing','Capture frozen; retaining evidence before ARM tray close',self.event)
                         if self.capture_deadline_reached():
                             self.submitted = True
                             self.capture_failed = True
@@ -378,9 +475,10 @@ class Camera:
             except Exception as exc:
                 with self.lock:
                     self.status.update(connected=False, message=str(exc))
-                    self.background = None
+                    if not self.preparation:
+                        self.background = None
                     self.full_frame = None
-                    self.status['calibrated'] = False
+                    self.status['calibrated'] = bool(self.preparation and self.preparation.background is not None)
                     if self.event:
                         self.on_result(self.event, {'accepted':False, 'frames':[], 'reason':'Camera disconnected; recapture required'})
                     self.event = None
@@ -436,6 +534,14 @@ class Camera:
                 tray_action = self.on_snapshot_saved(event, results)
                 if tray_action and tray_action.get('status') == 'closed':
                     self.release(event)
+                    if self.preparation:
+                        with self.lock:
+                            if self.event==event:
+                                self.event=None
+                                self.event_started_at=None
+                                self.gate=PresentationGate()
+                            self.preparation.set_stage('recognising_scanning',
+                                'Capture retained; ARM tray close started its prescan while recognition runs',event)
             if self.s.recognition_backend == 'ollama-agreement' and not test_only:
                 result = recognize_agreement(self.s, images, event, self.get_masters())
                 result['frames'] = results
@@ -480,7 +586,11 @@ class Camera:
                 result['capture_quality']=capture_quality
             self.on_result(event, result)
             with self.lock:
-                self.status['message'] = result['reason']
+                if self.preparation and self.preparation.stage == 'capturing':
+                    self.preparation.set_stage('recognising_scanning',
+                        'Recognition complete; waiting for the matching ARM scan/job',event)
+                    self.status.update(self.preparation.snapshot())
+                self.status['message'] = result.get('reason') or self.status.get('message')
         except Exception as exc:
             reason = str(exc) if isinstance(exc, VisionError) else 'Image recognition failed; check service configuration and try again'
             failure = {'accepted':False, 'test_only':test_only,

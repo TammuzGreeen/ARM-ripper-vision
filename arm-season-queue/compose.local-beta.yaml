@@ -10,11 +10,21 @@ services:
         IMAGE_VERSION: ${QUEUE_RELEASE_IMAGE:?Set the image tag}
     group_add:
       - "${ARM_GID:?Set ARM's media group ID for post-rip review renames}"
+      - "${OPTICAL_GID:?Set optical device read-only group ID}"
+    devices:
+      - "${OPTICAL_DEVICE_HOST:?Set configured host optical device}:/dev/sr0:r"
     environment:
       DRY_RUN_ONLY: "false"
       LOCAL_BETA_ENABLED: "true"
+      ARM_AUTO_ORDINAL_MAPPING: "true"
       LOCAL_BETA_TRAY_CYCLE_ENABLED: "false"
-      LOCAL_BETA_TRAY_CLOSE_ENABLED: "false"
+      LOCAL_BETA_TRAY_CLOSE_ENABLED: "true"
+      TRAY_MONITOR_ENABLED: "true"
+      TRAY_MONITOR_DEVICE: /dev/sr0
+      TRAY_STATE_POLL_SECONDS: "0.5"
+      TRAY_STATE_DEBOUNCE_SAMPLES: "3"
+      TRAY_CALIBRATION_SETTLE_SECONDS: "2"
+      TRAY_CALIBRATION_TIMEOUT_SECONDS: "60"
       FILEFLOWS_ENABLED: "false"
       APP_VERSION: ${QUEUE_RELEASE_IMAGE:?Set the image tag}
       MEDIA_HOST_PREFIX: ${MEDIA_HOST_PREFIX:?Set the host path corresponding to /media}

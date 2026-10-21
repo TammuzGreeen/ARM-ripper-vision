@@ -1,5 +1,37 @@
 # Verification and qualification
 
+## Read-only tray monitoring and automatic empty-view preparation (2026-10-21)
+
+The implementation now polls Linux `CDROM_DRIVE_STATUS` on only the configured
+optical device opened read-only. Closed/no-disc is distinct from open; unstable
+open/closed readings are debounced and unknown readings fail closed immediately.
+The camera workflow persists its tray-cycle and empty-view baseline, detects
+early placement, waits for removal after ARM AUTO_EJECT, freezes capture
+evidence before asking ARM to close, and records cycle provenance. ARM remains
+the sole scanner, close, rip and automatic eject owner. The durable overlay
+opts in to ordinal mapping, read-only monitoring and ARM-mediated close; global
+ARM pause remains the gate and the queue's explicit per-job start path remains
+the only start mechanism. FileFlows and external image processing remain off.
+
+The Python 3.12 Docker test image passed the active suite: **209 tests passed**.
+This includes state/debounce/calibration/restart/repeated-callback regressions
+and the generated-media integration test. This is software validation only;
+it does not qualify the camera's disc detector, physical tray transitions,
+ARM's scan/close/start/eject behavior, or the resulting files. The next optional
+follow-up is to evaluate an API-based GPT vision fallback; the exact served
+model ID/configuration must be verified then. It is not implemented here and no
+images were sent externally for this task.
+
+## Opt-in ordinal mapping implementation (2026-10-20)
+
+The current local-beta implementation adds `ARM_AUTO_ORDINAL_MAPPING`, default
+off. If enabled, it requires accepted field-evidence recognition, a complete
+contiguous printed episode range, and a matching count of ARM titles at least
+30 seconds long. Shorter titles remain provisional. Each assignment retains its
+MakeMKV source ID and scan metadata and is marked inferred/unverified; matching
+counts do not prove episode identity or order. This describes implementation
+policy only; it is not physical-disc validation. See `docs/local-beta.md`.
+
 ## Scanner handoff race guard and historical dry-run assessment (2026-10-11)
 
 The host-side info scanner now treats ARM's tray-close-triggered prescan as a

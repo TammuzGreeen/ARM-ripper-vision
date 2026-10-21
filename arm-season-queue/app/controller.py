@@ -17,6 +17,7 @@ from .formats import Masterlist, arm_name, arm_output_path, digest, rip_readines
 from .dry_run import build_plan as build_dry_run_plan, parse_info
 from .handover import beneath, canonical, checksum, inspect_beta_file, inspect_file, publish_json, write_json_atomic
 from .recognition import match
+from .ordinal import infer_ordinal_mapping
 from .state import Store, encode
 
 
@@ -30,6 +31,8 @@ class Controller:
         self.validation = ThreadPoolExecutor(max_workers=1,thread_name_prefix='output-validation')
         self.futures = {}
         self.on_tray_open = lambda initial=False: None
+        self.on_arm_ejected = lambda job: None
+        self.get_tray_status = lambda: None
         self.tray_initialized = False
         self.status = 'Not connected; camera and masterlist tools are available'
         self.initialized = False
@@ -113,6 +116,14 @@ class Controller:
                       'models':{},'ollama_version':None}
         self.db.put('preflight',arm)
         self.db.put('agreement_preflight',models)
+        tray_status=self.get_tray_status() if getattr(self.s,'tray_monitor_enabled',False) else None
+        tray_monitor={'enabled':bool(getattr(self.s,'tray_monitor_enabled',False)),
+                      'ready':(not getattr(self.s,'tray_monitor_enabled',False)
+                               or bool(tray_status and tray_status.get('tray_state') in ('open','closed'))),
+                      'status':tray_status}
+        tray_issues=[]
+        if tray_monitor['enabled'] and not tray_monitor['ready']:
+            tray_issues.append((tray_status or {}).get('message','Tray-state monitor has no reliable reading'))
         storage = {}
         paths=[('state',self.s.state,True),('queue_media',self.s.media,False),
                ('handover',self.s.handover,self.s.fileflows_enabled)]
@@ -129,8 +140,9 @@ class Controller:
         storage_issues += [f'{name} storage is not writable' for name,item in storage.items()
                            if item['required_writable'] and not item['writable']]
         return {'arm':arm,'models':models,'storage':storage,'storage_issues':storage_issues,
+                'tray_monitor':tray_monitor,'tray_issues':tray_issues,
                 'camera_mode':self.s.camera_mode,'fileflows_enabled':self.s.fileflows_enabled,
-                'ready':bool(arm.get('ready') and models.get('ready') and not storage_issues)}
+                'ready':bool(arm.get('ready') and models.get('ready') and not storage_issues and not tray_issues)}
 
     def activate(self, master_id=None, start_disc=None, start_entry=None):
         with self.lock:
@@ -200,6 +212,13 @@ class Controller:
         return None
 
     def close_tray_after_snapshot(self,event,frame_refs):
+        # The same capture may be retried by the worker after a timeout or
+        # duplicate callback. Serialize this non-idempotent ARM operation and
+        # return its first durable intent/result instead of issuing it twice.
+        with self.lock:
+            return self._close_tray_after_snapshot(event,frame_refs)
+
+    def _close_tray_after_snapshot(self,event,frame_refs):
         """Close only after durable capture, through ARM, with no current insertion."""
         if not (getattr(self.s,'local_beta',False) and getattr(self.s,'tray_close_enabled',False)):
             return {'status':'disabled'}
@@ -207,8 +226,17 @@ class Controller:
         if len(rows)!=1 or rows[0]['status']!='processing':
             return {'status':'failed','error':'Capture event is not a fresh processing event'}
         body=json.loads(rows[0]['body'])
+        previous_action=body.get('tray_action')
+        if previous_action:
+            return previous_action
         if body.get('source')!='camera' or time.time()-rows[0]['created']>=self.s.ttl:
             return {'status':'failed','error':'Capture is not a fresh automatic webcam presentation'}
+        if getattr(self.s,'tray_monitor_enabled',False):
+            tray_state=self.get_tray_status() or {}
+            if (tray_state.get('tray_state')!='open'
+                    or tray_state.get('preparation_stage')!='capturing'
+                    or (body.get('tray_cycle') or {}).get('tray_cycle_id')!=tray_state.get('tray_cycle_id')):
+                return {'status':'failed','error':'Physical tray state/cycle no longer matches this capture; tray was not closed'}
         evidence=self.s.state/'evidence'
         for frame in frame_refs:
             reference=frame.get('evidence','')
@@ -259,6 +287,25 @@ class Controller:
             run.update(event=event, status='recognizing', capture_source='live_camera', created=time.time())
             self.db.put('active_dry_run', run)
         return event
+
+    def annotate_event_tray_cycle(self,event,context):
+        if not isinstance(context,dict):
+            return
+        rows=self.db.rows('SELECT body FROM events WHERE id=?',(event,))
+        if len(rows)!=1:
+            return
+        body=json.loads(rows[0]['body'])
+        body['tray_cycle']=dict(context)
+        self.db.execute('UPDATE events SET body=? WHERE id=?',(encode(body),event))
+
+    def invalidate_camera_event(self,event,reason):
+        rows=self.db.rows('SELECT body,status FROM events WHERE id=?',(event,))
+        if len(rows)!=1 or rows[0]['status'] not in ('processing','ready'):
+            return
+        body=json.loads(rows[0]['body'])
+        body['tray_cycle_invalidation']={'at':time.time(),'reason':str(reason)}
+        self.db.execute("UPDATE events SET body=?,status='invalidated',released=0 WHERE id=?",
+                        (encode(body),event))
 
     def release_event(self, event):
         run = self.db.get('active_dry_run')
@@ -1311,6 +1358,7 @@ class Controller:
                     confirmed_mapping = plan(selected_master, selected_disc, detail)
                 except (ValueError, StopIteration):
                     confirmed_mapping = None
+        inference = None
         completed_directory=self.arm.completed_directory(detail['job'],selected_master if confirmed_mapping else None)
         arm_media=PurePosixPath(self.s.arm_media)
         if arm_media not in completed_directory.parents:
@@ -1327,6 +1375,13 @@ class Controller:
             policy = 'all sources selected by compatible approved masterlist; explicit exclusions recorded'
             mapping_source = 'approved masterlist mapping'
         else:
+            inference_reason = None
+            if not existing_matches:
+                inference, inference_reason = infer_ordinal_mapping(
+                    (body.get('result') or {}), tracks,
+                    enabled=bool(getattr(self.s, 'auto_ordinal_mapping', False)))
+            inferred_by_id = ({item['makemkv_id']:item for item in inference['assignments']}
+                              if inference else {})
             mapping = []
             for track in sorted(tracks, key=lambda t: int(t['track_number'])):
                 number = int(track['track_number'])
@@ -1334,29 +1389,67 @@ class Controller:
                     raise ValueError(f'Source title {number} is outside the supported per-title length range')
                 recognized_series=identity.get('series_display') or identity.get('series')
                 recognized_season=identity.get('season')
-                prefix=arm_name(str(recognized_series))+' ' if recognized_series else ''
-                season_part=f'S{int(recognized_season):02d} - ' if str(recognized_season or '').isdigit() else ''
-                basename = f'{prefix}{season_part}Source Title {number:03d} - PROVISIONAL'
+                inferred = inferred_by_id.get(number)
+                if inferred:
+                    episode_number=inferred['episode_number']
+                    basename=arm_name(f'{inference["series"]} S{inference["season"]:02d}E{episode_number:02d} '
+                                      f'- Episode {episode_number:02d} - INFERRED')
+                    episode={'number':episode_number,'end':None,'title':None}
+                    content_name=f'Episode {episode_number:02d} (ordinal inferred)'
+                    mapping_evidence=inference['warning']
+                    mapping_status='inferred_unverified'
+                    attribution={'mapping_status':mapping_status,'mapping_method':inference['method'],
+                        'verified':False,'series_source':'camera recognition',
+                        'season_source':'camera recognition','episode_range_source':'camera recognition',
+                        'observed_episode_range':inference['episodes'],
+                        'expected_episode_count':inference['expected_episode_count'],
+                        'relevant_title_count':inference['relevant_title_count'],
+                        'min_relevant_title_seconds':inference['min_relevant_title_seconds'],
+                        'ordinal_position':inferred['ordinal_position'],
+                        'dvd_title_number':track.get('dvd_title_number'),
+                        'makemkv_id':number,'warning':inference['warning']}
+                else:
+                    prefix=arm_name(str(recognized_series))+' ' if recognized_series else ''
+                    season_part=f'S{int(recognized_season):02d} - ' if str(recognized_season or '').isdigit() else ''
+                    basename = f'{prefix}{season_part}Source Title {number:03d} - PROVISIONAL'
+                    episode=None
+                    content_name=f'Source Title {number:03d}'
+                    mapping_evidence=(f'Not ordinal-mapped: {inference_reason}' if inference_reason else
+                                      'source-title ID only; episode identity unresolved')
+                    mapping_status='provisional'
+                    attribution={'mapping_status':mapping_status,
+                        'series_source':'recognition observation' if recognized_series else 'unknown',
+                        'season_source':'recognition observation' if recognized_season is not None else 'unknown',
+                        'episode_title_source':'unknown','makemkv_id':number,
+                        'dvd_title_number':track.get('dvd_title_number')}
                 dest = media_directory / f'{basename}.mkv'
                 path = beneath(self.s.media, str(dest.relative_to(PurePosixPath(self.s.media))))
                 if path.exists():
                     raise ValueError(f'Output already exists; refusing overwrite: {path}')
                 mapping.append({
                     'arm_track_id': track['track_id'], 'makemkv_id': number,
-                    'episode': None, 'content_name': f'Source Title {number:03d}',
+                    'episode': episode, 'content_name': content_name,
                     'version': None, 'basename': basename,
-                    'destination': str(dest), 'destination_kind': 'provisional local beta output',
-                    'mapping_evidence': 'source-title ID only; episode identity unresolved',
-                    'naming_attribution':{'series_source':'recognition observation' if recognized_series else 'unknown',
-                        'season_source':'recognition observation' if recognized_season is not None else 'unknown',
-                        'episode_title_source':'unknown','makemkv_id':number},
+                    'destination': str(dest), 'destination_kind':
+                        'inferred local beta output' if inferred else 'provisional local beta output',
+                    'identifier_spaces':{'arm_track_id':track['track_id'],
+                        'makemkv_source_id':number,'dvd_title_number':track.get('dvd_title_number'),
+                        'ordinal_position':inferred.get('ordinal_position') if inferred else None},
+                    'mapping_evidence': mapping_evidence,
+                    'mapping_status':mapping_status,
+                    'mapping_attribution':attribution,
+                    'naming_attribution':attribution,
                     'inventory': None, 'scan_duration': int(track['length']), 'scan': track,
-                    'provisional': True,
+                    'provisional': True,'inferred':bool(inferred),'verified':False,
                 })
             selected_ids = {int(item['makemkv_id']) for item in mapping}
             excluded = []
-            policy = 'all ARM-prescanned selectable source titles'
-            mapping_source = 'provisional source-title IDs'
+            if inference:
+                policy='all ARM-prescanned sources; ordinal episode assignment is inferred and unverified'
+                mapping_source='opt-in inferred ordinal mapping'
+            else:
+                policy = 'all ARM-prescanned selectable source titles'
+                mapping_source = 'provisional source-title IDs'
         for item in mapping:
             dest_path = beneath(self.s.media, str(PurePosixPath(item['destination']).relative_to(PurePosixPath(self.s.media))))
             if dest_path.exists():
@@ -1364,6 +1457,8 @@ class Controller:
         disc_id = selected_disc.id if confirmed_mapping and selected_disc else f'local-source-job-{job}'
         recognition_result=body.get('result') or {}
         warnings=list((recognition_result.get('agreement') or {}).get('reasons') or [])
+        if inference:
+            warnings.append(inference['warning'])
         if recognition_result.get('reason') and not recognition_result.get('accepted'):
             warnings.append(recognition_result['reason'])
         if recognition_result.get('capture_quality'):
@@ -1376,6 +1471,8 @@ class Controller:
             'source_titles': tracks, 'selection_policy': policy,
             'selected_titles': mapping, 'excluded_titles': excluded, 'mapping': mapping,
             'mapping_source': mapping_source, 'identity_fields': identity,
+            'ordinal_mapping':inference,
+            'tray_cycle':body.get('tray_cycle'),
             'warnings': list(dict.fromkeys(warnings)),
         }
         try:
@@ -1554,6 +1651,8 @@ class Controller:
                 tray_action.update(status='not_confirmed',detail='ARM AUTO_EJECT did not confirm before timeout; physical tray state is unverified')
             if tray_action['status']!='command_succeeded_physical_state_unverified':
                 tray_warning='ARM automatic eject was not confirmed: '+str(tray_action.get('error') or tray_action.get('detail') or 'inspect the tray')
+            else:
+                self.on_arm_ejected(job)
         now=time.time()
         review = {'schema_version':1,'job':job,'event':row['event'],'batch':row['batch'],
                   'status':'awaiting_review','workflow':'local-beta-v1','created_at':now,
@@ -1576,6 +1675,8 @@ class Controller:
                   'scan':payload['source_titles'],'selection_policy':payload['selection_policy'],
                   'selected_titles':payload['selected_titles'],'excluded_titles':payload['excluded_titles'],
                   'mapping_source':payload['mapping_source'],'outputs':outputs,
+                  'ordinal_mapping':payload.get('ordinal_mapping'),
+                  'tray_cycle':payload.get('tray_cycle'),
                   'warnings':list(payload.get('warnings',[]))+([tray_warning] if tray_warning else []),
                   'tray_action':tray_action,
                   'review_history':[],'feedback':{'reviewed_fields':[],'corrections':[]}}
@@ -1713,6 +1814,19 @@ class Controller:
                     output['episode']={'number':int(fields.get('episode_number') or fields['episode_range'].split('-')[0]),
                                        'end':int(fields['episode_range'].split('-')[-1]) if fields.get('episode_range') else None,
                                        'title':fields.get('episode_name')}
+                    if output.get('mapping_status')=='inferred_unverified':
+                        output['mapping_status']='human_corrected'
+                        output['verified']=True
+                        output.setdefault('mapping_attribution',{}).setdefault('human_corrections',[]).append({
+                            'revision':revision,'at':time.time(),'fields':dict(fields),
+                            'supersedes_inference':True})
+            if action=='accept' and 'episodes' in set(reviewed_fields):
+                for output in review.get('outputs',[]):
+                    if output.get('mapping_status')=='inferred_unverified':
+                        output['mapping_status']='human_verified'
+                        output['verified']=True
+                        output.setdefault('mapping_attribution',{})['human_verified_at']=time.time()
+                        output['mapping_attribution']['human_verified_revision']=revision
             latest_identity=review.get('identity_fields') or {}
             if identity_correction.get('series'):
                 latest_identity['series_display']=str(identity_correction['series']).strip()
@@ -1843,8 +1957,10 @@ class Controller:
                 'agreement_preflight':self.db.get('agreement_preflight'),
                 'storage':storage, 'fileflows_enabled':self.s.fileflows_enabled,
                 'dry_run_only':self.s.dry_run_only,
-                'local_beta_enabled':getattr(self.s,'local_beta',False),
-                'tray_cycle_enabled':getattr(self.s,'tray_cycle_enabled',False),
+                 'local_beta_enabled':getattr(self.s,'local_beta',False),
+                 'auto_ordinal_mapping':getattr(self.s,'auto_ordinal_mapping',False),
+                 'tray_monitor_enabled':getattr(self.s,'tray_monitor_enabled',False),
+                 'tray_cycle_enabled':getattr(self.s,'tray_cycle_enabled',False),
                 'tray_close_enabled':getattr(self.s,'tray_close_enabled',False),
                 'tray_cycle_status':self.db.get('tray_cycle_status'),
                 'batch_context':(self.db.get('batch_contexts',{}).get(self.db.get('active_batch')) if self.db.get('active_batch') else None),

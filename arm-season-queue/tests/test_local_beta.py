@@ -16,9 +16,84 @@ from app.controller import Controller
 from app.main import create_app
 from app.state import Store, encode
 from app.formats import arm_output_path, output_destination
+from app.ordinal import infer_ordinal_mapping
 
 
 class LocalBetaTests(unittest.TestCase):
+    @staticmethod
+    def ordinal_result():
+        return {'accepted':True,'agreement':{
+            'accepted':True,'status':'PASS','field_disagreements':[],'operational_failures':[],
+            'working_identification':{'series_display':'Example Series','season':1,'episodes':[1,2],
+                                      'disc_format':['dvd']},
+            'field_combinations':{'episodes':{'classification':'corroborated'},
+                                  'season':{'classification':'single-source'}}}}
+
+    def test_ordinal_mapping_is_disabled_by_default_and_requires_local_beta_to_enable(self):
+        self.assertFalse(Settings().auto_ordinal_mapping)
+        with self.assertRaisesRegex(ValueError,'requires LOCAL_BETA_ENABLED'):
+            Settings(auto_ordinal_mapping=True,local_beta=False)
+        result,reason=infer_ordinal_mapping(self.ordinal_result(),[],enabled=False)
+        self.assertIsNone(result)
+        self.assertIn('disabled',reason)
+
+    def test_ordinal_mapping_requires_matching_relevant_title_count_and_preserves_ids(self):
+        tracks=[{'track_number':8,'track_id':80,'length':1500,'source':'first'},
+                {'track_number':2,'track_id':20,'length':42,'source':'second'},
+                {'track_number':3,'track_id':30,'length':60,'source':'third'},
+                {'track_number':1,'track_id':10,'length':12,'source':'extra'}]
+        result,reason=infer_ordinal_mapping(self.ordinal_result(),tracks,enabled=True)
+        self.assertIsNone(result)
+        self.assertIn('Count mismatch',reason)
+        tracks=[tracks[0],tracks[1],tracks[3]]
+        result,reason=infer_ordinal_mapping(self.ordinal_result(),tracks,enabled=True)
+        self.assertIsNone(reason)
+        self.assertEqual(result['eligible_makemkv_ids'],[2,8])
+        self.assertEqual([(item['makemkv_id'],item['episode_number']) for item in result['assignments']],
+                         [(2,1),(8,2)])
+        self.assertEqual(result['status'],'inferred_unverified')
+        self.assertFalse(result['verified'])
+        self.assertIn('do not prove',result['warning'])
+
+    def test_ordinal_mapping_rejects_incomplete_ranges_and_bad_recognition(self):
+        result_data=self.ordinal_result()
+        result_data['agreement']['working_identification']['episodes']=[1,3]
+        inferred,reason=infer_ordinal_mapping(result_data,[{'track_number':1,'length':50},
+                                                           {'track_number':3,'length':50}],enabled=True)
+        self.assertIsNone(inferred)
+        self.assertIn('contiguous',reason)
+        inferred,reason=infer_ordinal_mapping({'accepted':False},[],enabled=True)
+        self.assertIsNone(inferred)
+        self.assertIn('field-evidence',reason)
+
+    def test_owner_confirmed_ordinal_scope_maps_actual_ids_to_disc_episode_list(self):
+        result_data=self.ordinal_result()
+        result_data['agreement']['working_identification']['episodes']=[5,6,7,8]
+        tracks=[{'track_number':i,'track_id':100+i,'length':1200+i*60,
+                 'dvd_title_number':i+1} for i in range(4)]
+        mapping,reason=infer_ordinal_mapping(result_data,tracks,enabled=True)
+        self.assertIsNone(reason)
+        self.assertEqual([(x['makemkv_id'],x['episode_number']) for x in mapping['assignments']],
+                         [(0,5),(1,6),(2,7),(3,8)])
+        self.assertEqual([x['dvd_title_number'] for x in mapping['assignments']],[None]*4)
+        self.assertEqual([x['ordinal_position'] for x in mapping['assignments']],[1,2,3,4])
+        self.assertTrue(mapping['user_confirmed_scope']['source_ids_restart_each_disc'])
+        self.assertFalse(mapping['verified'])
+
+    def test_ordinal_scope_blocks_non_dvd_angles_and_duplicate_looking_titles(self):
+        data=self.ordinal_result()
+        data['agreement']['working_identification']['disc_format']=['blu-ray']
+        mapping,reason=infer_ordinal_mapping(data,[{'track_number':0,'length':50},
+            {'track_number':1,'length':60}],enabled=True)
+        self.assertIsNone(mapping);self.assertIn('DVDs',reason)
+        data=self.ordinal_result()
+        mapping,reason=infer_ordinal_mapping(data,[{'track_number':0,'length':50,'angle_count':2},
+            {'track_number':1,'length':60}],enabled=True)
+        self.assertIsNone(mapping);self.assertIn('angles',reason)
+        mapping,reason=infer_ordinal_mapping(data,[{'track_number':0,'length':50},
+            {'track_number':1,'length':50}],enabled=True)
+        self.assertIsNone(mapping);self.assertIn('Duplicate-looking',reason)
+
     def test_local_beta_configuration_requires_downstream_off_and_live_execution(self):
         with self.assertRaisesRegex(ValueError,'DRY_RUN_ONLY=false and FILEFLOWS_ENABLED=false'):
             Settings(local_beta=True,dry_run_only=True,fileflows_enabled=False,password='test')
@@ -26,6 +101,17 @@ class LocalBetaTests(unittest.TestCase):
             Settings(local_beta=True,dry_run_only=False,fileflows_enabled=True,password='test')
         valid=Settings(local_beta=True,dry_run_only=False,fileflows_enabled=False,password='test')
         self.assertTrue(valid.local_beta)
+
+    def test_automatic_ordinal_and_tray_close_require_local_beta_monitor(self):
+        with self.assertRaisesRegex(ValueError,'requires TRAY_MONITOR_ENABLED=true'):
+            Settings(local_beta=True,dry_run_only=False,fileflows_enabled=False,password='test',
+                     tray_close_enabled=True)
+        active=Settings(local_beta=True,dry_run_only=False,fileflows_enabled=False,password='test',
+            auto_ordinal_mapping=True,tray_monitor_enabled=True,tray_monitor_device='/dev/sr0',
+            tray_close_enabled=True)
+        self.assertTrue(active.auto_ordinal_mapping)
+        self.assertTrue(active.tray_monitor_enabled)
+        self.assertTrue(active.tray_close_enabled)
 
     def test_arm_tray_action_uses_explicit_arm_api_method(self):
         arm=ARM.__new__(ARM);arm.held=Mock();arm.call=Mock(return_value={'success':True})
@@ -129,7 +215,7 @@ class LocalBetaTests(unittest.TestCase):
     def test_snapshot_close_requires_saved_event_and_explicitly_calls_arm_close(self):
         with TemporaryDirectory() as tmp:
             root=Path(tmp);state=root/'state';media=root/'media'
-            c=Controller.__new__(Controller);c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True,tray_close_enabled=True,
+            c=Controller.__new__(Controller);c.lock=threading.RLock();c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True,tray_close_enabled=True,
                 state=state,ttl=180,batch_switch_policy='review',drive='/dev/sr0')
             c.db=Store(state/'queue.sqlite3');event=c.db.new_event('camera')
             (state/'evidence'/event).mkdir(parents=True)
@@ -147,11 +233,14 @@ class LocalBetaTests(unittest.TestCase):
                              ('POST','/drives/1/eject',{'method':'close'}))
             saved=json.loads(c.db.rows('SELECT body FROM events WHERE id=?',(event,))[0]['body'])
             self.assertEqual(saved['tray_action']['status'],'closed')
+            repeated=c.close_tray_after_snapshot(event,[{'evidence':f'{event}/0.jpg'}])
+            self.assertEqual(repeated['status'],'closed')
+            self.assertEqual(c.arm.call.call_count,2)
 
     def test_snapshot_never_closes_when_arm_reports_an_existing_job(self):
         with TemporaryDirectory() as tmp:
             root=Path(tmp);state=root/'state'
-            c=Controller.__new__(Controller);c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True,tray_close_enabled=True,
+            c=Controller.__new__(Controller);c.lock=threading.RLock();c.s=SimpleNamespace(local_beta=True,tray_cycle_enabled=True,tray_close_enabled=True,
                 state=state,ttl=180,drive='/dev/sr0')
             c.db=Store(state/'queue.sqlite3');event=c.db.new_event('camera')
             (state/'evidence'/event).mkdir(parents=True)

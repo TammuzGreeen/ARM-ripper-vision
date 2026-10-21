@@ -48,6 +48,13 @@ class Settings:
     local_beta: bool = env_bool('LOCAL_BETA_ENABLED', False)
     tray_cycle_enabled: bool = env_bool('LOCAL_BETA_TRAY_CYCLE_ENABLED', False)
     tray_close_enabled: bool = env_bool('LOCAL_BETA_TRAY_CLOSE_ENABLED', False)
+    tray_monitor_enabled: bool = env_bool('TRAY_MONITOR_ENABLED', False)
+    tray_monitor_device: str = os.getenv('TRAY_MONITOR_DEVICE', '/dev/arm-monitor')
+    tray_state_poll_seconds: float = float(os.getenv('TRAY_STATE_POLL_SECONDS', '0.5'))
+    tray_state_debounce_samples: int = int(os.getenv('TRAY_STATE_DEBOUNCE_SAMPLES', '3'))
+    tray_calibration_settle_seconds: float = float(os.getenv('TRAY_CALIBRATION_SETTLE_SECONDS', '2'))
+    tray_calibration_timeout_seconds: int = int(os.getenv('TRAY_CALIBRATION_TIMEOUT_SECONDS', '60'))
+    auto_ordinal_mapping: bool = env_bool('ARM_AUTO_ORDINAL_MAPPING', False)
     app_version: str = os.getenv('APP_VERSION', 'development')
     beta_output_root: str = os.getenv('BETA_OUTPUT_ROOT', '/media/unreviewed')
     media_host_prefix: str = os.getenv('MEDIA_HOST_PREFIX', '')
@@ -86,6 +93,20 @@ class Settings:
             raise ValueError('Tray cycling requires LOCAL_BETA_ENABLED=true')
         if self.tray_close_enabled and not self.local_beta:
             raise ValueError('Tray close requires LOCAL_BETA_ENABLED=true')
+        if self.tray_monitor_enabled and not self.local_beta:
+            raise ValueError('Tray monitoring requires LOCAL_BETA_ENABLED=true')
+        if self.tray_monitor_enabled and not self.tray_monitor_device.startswith('/'):
+            raise ValueError('TRAY_MONITOR_DEVICE must be an absolute path')
+        if (not 0.1 <= self.tray_state_poll_seconds <= 5
+                or not 2 <= self.tray_state_debounce_samples <= 10):
+            raise ValueError('Tray polling/debounce configuration is outside safe bounds')
+        if (not 0.5 <= self.tray_calibration_settle_seconds <= 10
+                or not 10 <= self.tray_calibration_timeout_seconds <= 300):
+            raise ValueError('Tray calibration timing is outside safe bounds')
+        if self.tray_close_enabled and not self.tray_monitor_enabled:
+            raise ValueError('Automatic tray close requires TRAY_MONITOR_ENABLED=true')
+        if self.auto_ordinal_mapping and not self.local_beta:
+            raise ValueError('ARM_AUTO_ORDINAL_MAPPING requires LOCAL_BETA_ENABLED=true')
         if self.beta_min_free_bytes < 1:
             raise ValueError('BETA_MIN_FREE_BYTES must be positive')
 
