@@ -1,0 +1,94 @@
+[
+  {
+    "season": 2,
+    "file": "tng_season_02.json",
+    "disc_numbers": [
+      1,
+      2,
+      3
+    ],
+    "episode_entries": 12,
+    "schema_validation": "passed against application Masterlist model at 8110913d0105b13d3f768a531eb9e95ff2c6fba2",
+    "mapping_tests": "synthetic matching IDs accepted; shifted IDs rejected",
+    "physical_scan_verified": false
+  },
+  {
+    "season": 3,
+    "file": "tng_season_03.json",
+    "disc_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "episode_entries": 26,
+    "schema_validation": "passed against application Masterlist model at 8110913d0105b13d3f768a531eb9e95ff2c6fba2",
+    "mapping_tests": "synthetic matching IDs accepted; shifted IDs rejected",
+    "physical_scan_verified": false
+  },
+  {
+    "season": 4,
+    "file": "tng_season_04.json",
+    "disc_numbers": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "episode_entries": 26,
+    "schema_validation": "passed against application Masterlist model at 8110913d0105b13d3f768a531eb9e95ff2c6fba2",
+    "mapping_tests": "synthetic matching IDs accepted; shifted IDs rejected",
+    "physical_scan_verified": false
+  },
+  {
+    "season": 5,
+    "file": "tng_season_05.json",
+    "disc_numbers": [
+      1,
+      2,
+      3
+    ],
+    "episode_entries": 12,
+    "schema_validation": "passed against application Masterlist model at 8110913d0105b13d3f768a531eb9e95ff2c6fba2",
+    "mapping_tests": "synthetic matching IDs accepted; shifted IDs rejected",
+    "physical_scan_verified": false
+  },
+  {
+    "season": 6,
+    "file": "tng_season_06.json",
+    "disc_numbers": [
+      1,
+      2,
+      4,
+      5,
+      6,
+      7
+    ],
+    "episode_entries": 22,
+    "schema_validation": "passed against application Masterlist model at 8110913d0105b13d3f768a531eb9e95ff2c6fba2",
+    "mapping_tests": "synthetic matching IDs accepted; shifted IDs rejected",
+    "physical_scan_verified": false
+  },
+  {
+    "season": 7,
+    "file": "tng_season_07.json",
+    "disc_numbers": [
+      1,
+      2,
+      4,
+      5,
+      6,
+      7
+    ],
+    "episode_entries": 21,
+    "schema_validation": "passed against application Masterlist model at 8110913d0105b13d3f768a531eb9e95ff2c6fba2",
+    "mapping_tests": "synthetic matching IDs accepted; shifted IDs rejected",
+    "physical_scan_verified": false
+  }
+]

@@ -1,0 +1,319 @@
+{
+  "schema_version": 2,
+  "id": "tng_s06_de_dvd_reference_v1",
+  "series": "Star Trek: The Next Generation",
+  "season": 6,
+  "edition": "German Paramount DVD season parts",
+  "edition_name": "German DVD Season Part 1 / Part 2",
+  "approved": true,
+  "provenance": [
+    "Derived from user-supplied TNG photo/research package dated 2026-10-20; original photographs were not independently re-examined during this correction.",
+    "User authorized corrected masterlist publication on 2026-10-21. Approval covers the retained descriptive metadata and user-confirmed ordinal rule, not physical source-content verification.",
+    "User explicitly confirmed on 2026-10-21: source 0 maps to the first listed episode on each disc, source 1 to the second, restarting on every disc.",
+    "Packaging text is recorded as printed_identifiers, not as a scanned filesystem volume label. Actual volume labels remain unknown.",
+    "Retain every available audio and subtitle stream through ARM/MakeMKV configuration. This metadata file does not configure stream selection.",
+    "Partial coverage: omitted discs must not be inferred from this list. See README.md and validation.json.",
+    "Disc 3 excluded: supplied titles were DS9 episodes mixed into a TNG record. No replacement physical-disc assignment asserted."
+  ],
+  "unresolved": [],
+  "discs": [
+    {
+      "id": "s06d01",
+      "number": 1,
+      "printed_identifiers": [
+        "Season 6 Part 1",
+        "Disc 1",
+        "Episoden 1-4"
+      ],
+      "labels": [],
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "Gefahr aus dem 19. Jahrhundert, Teil II"
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Todesangst beim Beamen"
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Der unmoralische Friedensvermittler"
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Besuch von der alten Enterprise"
+        }
+      ],
+      "unresolved": [
+        "Actual source IDs, stream inventories and any extras/combined-title structure require a current disc scan; the rule is user-confirmed, not scan-verified."
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD season parts",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User explicitly confirmed the per-disc source-0-first-listed-episode convention on 2026-10-21. Resolve against actual MakeMKV IDs; do not treat ordering as independently verified content."
+        }
+      ]
+    },
+    {
+      "id": "s06d02",
+      "number": 2,
+      "printed_identifiers": [
+        "Season 6 Part 1",
+        "Disc 2",
+        "Episoden 5-8"
+      ],
+      "labels": [],
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "In den Subraum entführt"
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Eine echte Q"
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Erwachsene Kinder"
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Eine handvoll Datas"
+        }
+      ],
+      "unresolved": [
+        "Actual source IDs, stream inventories and any extras/combined-title structure require a current disc scan; the rule is user-confirmed, not scan-verified."
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD season parts",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User explicitly confirmed the per-disc source-0-first-listed-episode convention on 2026-10-21. Resolve against actual MakeMKV IDs; do not treat ordering as independently verified content."
+        }
+      ]
+    },
+    {
+      "id": "s06d04",
+      "number": 4,
+      "printed_identifiers": [
+        "Season 6 Part 2",
+        "Disc 4",
+        "Episoden 13-16"
+      ],
+      "labels": [],
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Aquiel"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "Das Gesicht des Feindes"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Willkommen im Leben nach dem Tode"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Der Moment der Erkenntnis, Teil I"
+        }
+      ],
+      "unresolved": [
+        "Actual source IDs, stream inventories and any extras/combined-title structure require a current disc scan; the rule is user-confirmed, not scan-verified."
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD season parts",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User explicitly confirmed the per-disc source-0-first-listed-episode convention on 2026-10-21. Resolve against actual MakeMKV IDs; do not treat ordering as independently verified content."
+        }
+      ]
+    },
+    {
+      "id": "s06d05",
+      "number": 5,
+      "printed_identifiers": [
+        "Season 6 Part 2",
+        "Disc 5",
+        "Episoden 17-20"
+      ],
+      "labels": [],
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Der Moment der Erkenntnis, Teil II"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "In der Hand von Terroristen"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Der Feuersturm"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Das fehlende Fragment"
+        }
+      ],
+      "unresolved": [
+        "Actual source IDs, stream inventories and any extras/combined-title structure require a current disc scan; the rule is user-confirmed, not scan-verified."
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD season parts",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User explicitly confirmed the per-disc source-0-first-listed-episode convention on 2026-10-21. Resolve against actual MakeMKV IDs; do not treat ordering as independently verified content."
+        }
+      ]
+    },
+    {
+      "id": "s06d06",
+      "number": 6,
+      "printed_identifiers": [
+        "Season 6 Part 2",
+        "Disc 6",
+        "Episoden 21-24"
+      ],
+      "labels": [],
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Phantasie oder Wahrheit"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Verdächtigungen"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Der rechtmäßige Erbe"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "Riker : 2 = ?"
+        }
+      ],
+      "unresolved": [
+        "Actual source IDs, stream inventories and any extras/combined-title structure require a current disc scan; the rule is user-confirmed, not scan-verified."
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD season parts",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User explicitly confirmed the per-disc source-0-first-listed-episode convention on 2026-10-21. Resolve against actual MakeMKV IDs; do not treat ordering as independently verified content."
+        }
+      ]
+    },
+    {
+      "id": "s06d07",
+      "number": 7,
+      "printed_identifiers": [
+        "Season 6 Part 2",
+        "Disc 7",
+        "Episoden 25-26"
+      ],
+      "labels": [],
+      "episodes": [
+        {
+          "printed": "25",
+          "number": 25,
+          "title": "Gefangen in einem temporären Fragment"
+        },
+        {
+          "printed": "26",
+          "number": 26,
+          "title": "Angriff der Borg, Teil I"
+        }
+      ],
+      "unresolved": [
+        "Actual source IDs, stream inventories and any extras/combined-title structure require a current disc scan; the rule is user-confirmed, not scan-verified."
+      ],
+      "extras": [
+        {
+          "id": "s06d07extra01",
+          "title": "Missions-Überblick - Jahr Sechs",
+          "provenance": [
+            "German special feature title printed on photographed disc case."
+          ]
+        },
+        {
+          "id": "s06d07extra02",
+          "title": "Völlig neue Wege",
+          "provenance": [
+            "German special feature title printed on photographed disc case."
+          ]
+        },
+        {
+          "id": "s06d07extra03",
+          "title": "Sektions-Briefing - Jahr Sechs (Produktion, Profil Dan Curry)",
+          "provenance": [
+            "German special feature title printed on photographed disc case."
+          ]
+        },
+        {
+          "id": "s06d07extra04",
+          "title": "Spezielles Crew-Profil: Commander Data",
+          "provenance": [
+            "German special feature title printed on photographed disc case."
+          ]
+        },
+        {
+          "id": "s06d07extra05",
+          "title": "Auswahl historischer Daten",
+          "provenance": [
+            "German special feature title printed on photographed disc case."
+          ]
+        },
+        {
+          "id": "s06d07extra06",
+          "title": "Starfleet Archiv (Sets und Ausstattung)",
+          "provenance": [
+            "German special feature title printed on photographed disc case."
+          ]
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD season parts",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User explicitly confirmed the per-disc source-0-first-listed-episode convention on 2026-10-21. Resolve against actual MakeMKV IDs; do not treat ordering as independently verified content."
+        }
+      ]
+    }
+  ]
+}
