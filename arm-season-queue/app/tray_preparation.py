@@ -125,6 +125,33 @@ class TrayPreparation:
             self._save()
             return
 
+        if state == 'open' and self.stage == 'tray_status_unavailable' and not initial:
+            # An ioctl outage can hide the physical open transition. Recover only
+            # by validating against the already-frozen empty reference; never
+            # seed an empty baseline from an unobserved open-tray scene.
+            if self.post_eject_job is not None:
+                self.stage = 'tray_open_waiting_for_disc_removal'
+                self.message = ('ARM-ejected disc may still be present; remove it and close the tray. '
+                                'The next manual empty-tray opening will prepare the baseline')
+            elif self.background is None:
+                self.stage = 'empty_view_preparation_needed'
+                self.message = ('Tray reopened after a tray-monitor outage, but no saved empty baseline '
+                                'is available; close and reopen it empty to start calibration')
+            else:
+                if not self.cycle_id:
+                    self.cycle_id = str(uuid4())
+                    self.cycle_started_at = time.time()
+                self.calibration_started = now
+                self.calibration_frames = []
+                self.previous_frame = None
+                self.stable_empty_frames = 0
+                self.calibration_reference = self.background.copy()
+                self.stage = 'calibrating_empty_tray'
+                self.message = ('Tray is open again; validating the saved empty scene before '
+                                'resuming calibration')
+            self._save()
+            return
+
         if initial:
             if state == 'closed':
                 if self.post_eject_empty_seen:

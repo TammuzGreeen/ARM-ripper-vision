@@ -10,6 +10,10 @@ from app.tray_preparation import TrayPreparation
 
 
 class TrayMonitorTests(unittest.TestCase):
+    @staticmethod
+    def frame(value=20):
+        return np.full((100,160),value,dtype=np.float32)
+
     def test_no_disc_is_closed_not_open_and_manual_open_is_debounced_once(self):
         self.assertEqual(TrayMonitor.classify(CDS_NO_DISC),'closed')
         self.assertEqual(TrayMonitor.classify(CDS_TRAY_OPEN),'open')
@@ -43,6 +47,34 @@ class TrayMonitorTests(unittest.TestCase):
             self.assertEqual(prep.stage,'tray_status_unavailable')
             prep.tray_observation('closed',now=1)
             self.assertEqual(prep.stage,'tray_closed')
+
+    def test_reliable_open_tray_recovers_only_against_saved_empty_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prep=TrayPreparation(tmp,'/dev/arm-monitor',settle_seconds=.1,calibration_samples=2)
+            empty=self.frame(20)
+            prep._save_background(empty.astype(np.uint8))
+            prep.background=empty.copy()
+            prep.tray_observation('unknown',now=0)
+            prep.tray_observation('open',now=1)
+            self.assertEqual(prep.stage,'calibrating_empty_tray')
+            self.assertIn('saved empty scene',prep.message)
+            prep.observe_frame(empty,stable=True,now=1.1)
+            self.assertEqual(prep.stage,'calibrating_empty_tray')
+            prep.observe_frame(empty,stable=True,now=1.2)
+            prep.observe_frame(empty,stable=True,now=1.3)
+            self.assertEqual(prep.stage,'ready_for_disc')
+
+    def test_open_tray_recovery_never_calibrates_disc_scene_as_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prep=TrayPreparation(tmp,'/dev/arm-monitor')
+            empty=self.frame(20)
+            prep._save_background(empty.astype(np.uint8))
+            prep.background=empty.copy()
+            prep.tray_observation('unknown',now=0)
+            prep.tray_observation('open',now=1)
+            prep.observe_frame(self.frame(220),stable=True,now=1.2)
+            self.assertEqual(prep.stage,'early_disc_during_calibration')
+            np.testing.assert_array_equal(prep.background,empty)
 
     def test_monitor_opens_device_read_only_and_polling_is_bounded(self):
         calls=[]
