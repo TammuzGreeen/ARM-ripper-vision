@@ -1,0 +1,351 @@
+{
+  "schema_version": 2,
+  "id": "ds9_s05_german_paramount_dvd_photographed",
+  "series": "Star Trek: Deep Space Nine",
+  "season": 5,
+  "edition": "German Paramount DVD",
+  "edition_name": "German DVD releases, photographed parts",
+  "approved": false,
+  "provenance": [
+    "Physical German-language DVD packaging photographed by user; episode names and disc grouping transcribed from printed inserts.",
+    "The user confirms for this masterlist that MakeMKV source IDs restart at 0 for each disc and follow each disc’s printed ordered episode list. Rule is not independently verified against scans.",
+    "User requested retaining every available audio track and subtitle track; actual track inventory is scan-dependent.",
+    "2026-10-21 correction: removed unscanned expanded title_map entries; retained user-confirmed mapping_rules for resolution against actual scans."
+  ],
+  "unresolved": [
+    "Source ID assignments follow user-confirmed convention but are not verified by MakeMKV scans.",
+    "DVD title numbers, technical stream inventories, filesystem identities and media track details not supplied.",
+    "Application model validation passed; import into the running service and physical scan verification remain untested."
+  ],
+  "discs": [
+    {
+      "id": "s05_d01",
+      "number": 1,
+      "printed_identifiers": [
+        "DISC 1",
+        "EPISODEN 1-4"
+      ],
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "Die Apokalypse droht"
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Das Schiff"
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Gefährliche Liebschaften"
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Die Schlacht um Ajilon Prime"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s05_d02",
+      "number": 2,
+      "printed_identifiers": [
+        "DISC 2",
+        "EPISODEN 5-8"
+      ],
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "Die Erpressung"
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Immer die Last mit den Tribbles"
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Die Reise nach Risa"
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Die Schuld"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s05_d03",
+      "number": 3,
+      "printed_identifiers": [
+        "DISC 3",
+        "EPISODEN 9-12"
+      ],
+      "episodes": [
+        {
+          "printed": "9",
+          "number": 9,
+          "title": "Der Aufstieg"
+        },
+        {
+          "printed": "10",
+          "number": 10,
+          "title": "Heilige Visionen"
+        },
+        {
+          "printed": "11",
+          "number": 11,
+          "title": "Dunkelheit und Licht"
+        },
+        {
+          "printed": "12",
+          "number": 12,
+          "title": "Das Baby"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s05_d04",
+      "number": 4,
+      "printed_identifiers": [
+        "DISC 4",
+        "EPISODEN 13-16"
+      ],
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Für die Uniform"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "Im Schatten der Hölle"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Im Lichte des Infernos"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Dr. Bashirs Geheimnis"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s05_d05",
+      "number": 5,
+      "printed_identifiers": [
+        "DISC 5",
+        "EPISODEN 17-20"
+      ],
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Der Datenkristall"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "Kriegsgeschäfte"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Die Überwindung"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Liebe und Profit"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s05_d06",
+      "number": 6,
+      "printed_identifiers": [
+        "DISC 6",
+        "EPISODEN 21-24"
+      ],
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Martoks Ehre"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Kinder der Zeit"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Glanz des Ruhms"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "Empok Nor"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s05_d07",
+      "number": 7,
+      "printed_identifiers": [
+        "DISC 7",
+        "EPISODEN 25-26"
+      ],
+      "episodes": [
+        {
+          "printed": "25",
+          "number": 25,
+          "title": "Die Karte"
+        },
+        {
+          "printed": "26",
+          "number": 26,
+          "title": "Zu den Waffen"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown.",
+        "Bonus-feature source identifiers are unknown; no title_map assignments for extras."
+      ],
+      "extras": [
+        {
+          "id": "extra_01",
+          "title": "Immer die Last mit den Tribbles: Vereinigung zweier Legenden",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_02",
+          "title": "Crew Dossier: Miles O’Brien",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_03",
+          "title": "Inside DS9 mit Mike Okuda",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_04",
+          "title": "Michael Westmores Aliens: Staffel Fünf",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_05",
+          "title": "Deep Space Nine Sketchbook: John Eaves",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_06",
+          "title": "Die Kultur der Ferengi",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "validator_revision": "ad8d1ae826850a2b307036d32024d116f77cd63a",
+  "results": [
+    {
+      "file": "ds9_season_02_masterlist_v2.json",
+      "discs": 4,
+      "episodes": 14,
+      "application_validation": "passed",
+      "synthetic_mapping_tests": "passed",
+      "approved": false,
+      "physical_scan_verified": false
+    },
+    {
+      "file": "ds9_season_05_masterlist_v2.json",
+      "discs": 7,
+      "episodes": 26,
+      "application_validation": "passed",
+      "synthetic_mapping_tests": "passed",
+      "approved": false,
+      "physical_scan_verified": false
+    },
+    {
+      "file": "ds9_season_06_masterlist_v2.json",
+      "discs": 3,
+      "episodes": 12,
+      "application_validation": "passed",
+      "synthetic_mapping_tests": "passed",
+      "approved": false,
+      "physical_scan_verified": false
+    },
+    {
+      "file": "ds9_season_07_masterlist_v2.json",
+      "discs": 7,
+      "episodes": 26,
+      "application_validation": "passed",
+      "synthetic_mapping_tests": "passed",
+      "approved": false,
+      "physical_scan_verified": false
+    }
+  ]
+}

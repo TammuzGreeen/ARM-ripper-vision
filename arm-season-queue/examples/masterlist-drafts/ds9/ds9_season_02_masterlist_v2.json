@@ -1,0 +1,218 @@
+{
+  "schema_version": 2,
+  "id": "ds9_s02_german_paramount_dvd_photographed",
+  "series": "Star Trek: Deep Space Nine",
+  "season": 2,
+  "edition": "German Paramount DVD",
+  "edition_name": "German DVD releases, photographed parts",
+  "approved": false,
+  "provenance": [
+    "Physical German-language DVD packaging photographed by user; episode names and disc grouping transcribed from printed inserts.",
+    "The user confirms for this masterlist that MakeMKV source IDs restart at 0 for each disc and follow each disc’s printed ordered episode list. Rule is not independently verified against scans.",
+    "User requested retaining every available audio track and subtitle track; actual track inventory is scan-dependent.",
+    "2026-10-21 correction: removed unscanned expanded title_map entries; retained user-confirmed mapping_rules for resolution against actual scans."
+  ],
+  "unresolved": [
+    "Source ID assignments follow user-confirmed convention but are not verified by MakeMKV scans.",
+    "DVD title numbers, technical stream inventories, filesystem identities and media track details not supplied.",
+    "Application model validation passed; import into the running service and physical scan verification remain untested."
+  ],
+  "discs": [
+    {
+      "id": "s02_d04",
+      "number": 4,
+      "printed_identifiers": [
+        "DISC 4",
+        "EPISODEN 13-16"
+      ],
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Das Harvester-Desaster"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "O’Briens Identität"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Das Paradies-Experiment"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Die Illusion"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s02_d05",
+      "number": 5,
+      "printed_identifiers": [
+        "DISC 5",
+        "EPISODEN 17-20"
+      ],
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Der Trill-Kandidat"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "Profit und Verlust"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Der Blutschwur"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Der Maquis, Teil 1"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s02_d06",
+      "number": 6,
+      "printed_identifiers": [
+        "DISC 6",
+        "EPISODEN 21-24"
+      ],
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Der Maquis, Teil 2"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Das Implantat"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Die andere Seite"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "Die Wahl des Kai"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s02_d07",
+      "number": 7,
+      "printed_identifiers": [
+        "DISC 7",
+        "EPISODEN 25-26"
+      ],
+      "episodes": [
+        {
+          "printed": "25",
+          "number": 25,
+          "title": "Das Tribunal"
+        },
+        {
+          "printed": "26",
+          "number": 26,
+          "title": "Der Plan des Dominion"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown.",
+        "Bonus-feature source identifiers are unknown; no title_map assignments for extras."
+      ],
+      "extras": [
+        {
+          "id": "extra_01",
+          "title": "Neue Grenzen: Die Geschichte von Deep Space Nine, Season Zwei",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_02",
+          "title": "Michael Westmores Aliens",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_03",
+          "title": "Crew Akte: Jadzia Dax",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_04",
+          "title": "Neue Station, neue Schiffe",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_05",
+          "title": "Quarks Geschichte",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        }
+      ]
+    }
+  ]
+}

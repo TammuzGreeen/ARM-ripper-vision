@@ -1,0 +1,365 @@
+{
+  "schema_version": 2,
+  "id": "ds9_s07_german_paramount_dvd_photographed",
+  "series": "Star Trek: Deep Space Nine",
+  "season": 7,
+  "edition": "German Paramount DVD",
+  "edition_name": "German DVD releases, photographed parts",
+  "approved": false,
+  "provenance": [
+    "Physical German-language DVD packaging photographed by user; episode names and disc grouping transcribed from printed inserts.",
+    "The user confirms for this masterlist that MakeMKV source IDs restart at 0 for each disc and follow each disc’s printed ordered episode list. Rule is not independently verified against scans.",
+    "User requested retaining every available audio track and subtitle track; actual track inventory is scan-dependent.",
+    "2026-10-21 correction: removed unscanned expanded title_map entries; retained user-confirmed mapping_rules for resolution against actual scans."
+  ],
+  "unresolved": [
+    "Source ID assignments follow user-confirmed convention but are not verified by MakeMKV scans.",
+    "DVD title numbers, technical stream inventories, filesystem identities and media track details not supplied.",
+    "Application model validation passed; import into the running service and physical scan verification remain untested."
+  ],
+  "discs": [
+    {
+      "id": "s07_d01",
+      "number": 1,
+      "printed_identifiers": [
+        "DISC 1",
+        "EPISODEN 1-4"
+      ],
+      "episodes": [
+        {
+          "printed": "1",
+          "number": 1,
+          "title": "Das Gesicht im Sand"
+        },
+        {
+          "printed": "2",
+          "number": 2,
+          "title": "Schatten und Symbole"
+        },
+        {
+          "printed": "3",
+          "number": 3,
+          "title": "Nachempfindung"
+        },
+        {
+          "printed": "4",
+          "number": 4,
+          "title": "Wettkampf in der Holosuite"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s07_d02",
+      "number": 2,
+      "printed_identifiers": [
+        "DISC 2",
+        "EPISODEN 5-8"
+      ],
+      "episodes": [
+        {
+          "printed": "5",
+          "number": 5,
+          "title": "Sarina"
+        },
+        {
+          "printed": "6",
+          "number": 6,
+          "title": "Verrat, Glaube und gewaltiger Fluss"
+        },
+        {
+          "printed": "7",
+          "number": 7,
+          "title": "Der Dahar-Meister"
+        },
+        {
+          "printed": "8",
+          "number": 8,
+          "title": "Die Belagerung von AR-558"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s07_d03",
+      "number": 3,
+      "printed_identifiers": [
+        "DISC 3",
+        "EPISODEN 9-12"
+      ],
+      "episodes": [
+        {
+          "printed": "9",
+          "number": 9,
+          "title": "Entscheidung auf Empok Nor"
+        },
+        {
+          "printed": "10",
+          "number": 10,
+          "title": "Leben in der Holosuite"
+        },
+        {
+          "printed": "11",
+          "number": 11,
+          "title": "Die verlorene Tochter"
+        },
+        {
+          "printed": "12",
+          "number": 12,
+          "title": "Die Tarnvorrichtung"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s07_d04",
+      "number": 4,
+      "printed_identifiers": [
+        "DISC 4",
+        "EPISODEN 13-16"
+      ],
+      "episodes": [
+        {
+          "printed": "13",
+          "number": 13,
+          "title": "Freies Schussfeld"
+        },
+        {
+          "printed": "14",
+          "number": 14,
+          "title": "Hirngespinst"
+        },
+        {
+          "printed": "15",
+          "number": 15,
+          "title": "Badda-Bing, Badda-Bang"
+        },
+        {
+          "printed": "16",
+          "number": 16,
+          "title": "Unter den Waffen schweigen die Gesetze"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s07_d05",
+      "number": 5,
+      "printed_identifiers": [
+        "DISC 5",
+        "EPISODEN 17-20"
+      ],
+      "episodes": [
+        {
+          "printed": "17",
+          "number": 17,
+          "title": "Im Ungewissen"
+        },
+        {
+          "printed": "18",
+          "number": 18,
+          "title": "Bis dass der Tod uns scheide"
+        },
+        {
+          "printed": "19",
+          "number": 19,
+          "title": "Eine sonderbare Kombination"
+        },
+        {
+          "printed": "20",
+          "number": 20,
+          "title": "Im Angesicht des Bösen"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s07_d06",
+      "number": 6,
+      "printed_identifiers": [
+        "DISC 6",
+        "EPISODEN 21-24"
+      ],
+      "episodes": [
+        {
+          "printed": "21",
+          "number": 21,
+          "title": "Ein Unglück kommt selten allein"
+        },
+        {
+          "printed": "22",
+          "number": 22,
+          "title": "Kampf mit allen Mitteln"
+        },
+        {
+          "printed": "23",
+          "number": 23,
+          "title": "Extreme Maßnahmen"
+        },
+        {
+          "printed": "24",
+          "number": 24,
+          "title": "In den Wirren des Krieges"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown."
+      ]
+    },
+    {
+      "id": "s07_d07",
+      "number": 7,
+      "printed_identifiers": [
+        "DISC 7",
+        "EPISODEN 25-26"
+      ],
+      "episodes": [
+        {
+          "printed": "25",
+          "number": 25,
+          "title": "Das, was du zurücklässt, Teil 1"
+        },
+        {
+          "printed": "26",
+          "number": 26,
+          "title": "Das, was du zurücklässt, Teil 2"
+        }
+      ],
+      "mapping_rules": [
+        {
+          "kind": "ascending_makemkv_id_to_episode_index",
+          "edition": "German Paramount DVD",
+          "first_makemkv_id": 0,
+          "first_episode_index": 0,
+          "evidence": "User-confirmed per-disc convention for this masterlist; actual MakeMKV selectors remain unverified."
+        }
+      ],
+      "unresolved": [
+        "MakeMKV IDs and mapped titles not yet checked against scan; DVD title numbers and stream inventories unknown.",
+        "Bonus-feature source identifiers are unknown; no title_map assignments for extras."
+      ],
+      "extras": [
+        {
+          "id": "extra_01",
+          "title": "Das Ende einer Ära",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_02",
+          "title": "Crew Dossier: Benjamin Sisko",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_03",
+          "title": "Crew Dossier: Jake Sisko",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_04",
+          "title": "Der letzte Abschied",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_05",
+          "title": "Sektion 31 Geheimakten",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_06",
+          "title": "Special Crew Dossier: Ezri Dax",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_07",
+          "title": "Deep Space Nine Sketchbook: John Eaves",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        },
+        {
+          "id": "extra_08",
+          "title": "Morn spricht!",
+          "provenance": [
+            "Printed special-features list in user photograph; source selector not established."
+          ]
+        }
+      ]
+    }
+  ]
+}
