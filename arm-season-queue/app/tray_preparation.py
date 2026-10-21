@@ -43,6 +43,8 @@ class TrayPreparation:
         self.stable_empty_frames = 0
         self.event_id = None
         self.manual_empty_reference = None
+        self.calibration_reference = None
+        self.post_eject_empty_seen = False
         self._load()
 
     def _load(self):
@@ -63,6 +65,7 @@ class TrayPreparation:
             self.cycle_id = saved.get('cycle_id')
             self.cycle_started_at = saved.get('cycle_started_at')
             self.post_eject_job = saved.get('post_eject_job')
+            self.post_eject_empty_seen = bool(saved.get('post_eject_empty_seen', False))
             self.event_id = saved.get('event_id')
             self.updated_at = float(saved.get('updated_at') or time.time())
         except (OSError, ValueError, TypeError):
@@ -76,6 +79,7 @@ class TrayPreparation:
             'schema_version': 1, 'device': self.device, 'tray_state': self.tray_state,
             'stage': self.stage, 'message': self.message, 'cycle_id': self.cycle_id,
             'cycle_started_at': self.cycle_started_at, 'post_eject_job': self.post_eject_job,
+            'post_eject_empty_seen': self.post_eject_empty_seen,
             'event_id':self.event_id,'updated_at': self.updated_at,
         }
         fd, name = tempfile.mkstemp(prefix='.tray-preparation-', dir=self.state_dir)
@@ -113,8 +117,19 @@ class TrayPreparation:
             self._save()
             return
 
+        if state == 'closed' and self.stage == 'tray_status_unavailable':
+            # The debounced monitor has recovered a reliable closed state after
+            # an ioctl outage; do not leave a stale unavailable stage behind.
+            self.stage = 'tray_closed'
+            self.message = 'Tray closed; reliable tray-state monitoring restored'
+            self._save()
+            return
+
         if initial:
             if state == 'closed':
+                if self.post_eject_empty_seen:
+                    self.post_eject_job = None
+                    self.post_eject_empty_seen = False
                 self.stage = 'tray_closed'
                 self.message = 'Tray closed'
             elif (previous_state == 'open' and state == 'open'
@@ -125,9 +140,15 @@ class TrayPreparation:
                 # invent a new opening event on service startup.
                 self.message = 'Resuming the persisted open-tray preparation cycle'
                 if self.stage == 'calibrating_empty_tray':
-                    self.calibration_started = now
-                    self.calibration_frames = []
-                    self.previous_frame = None
+                    if self.background is None:
+                        self.stage = 'empty_view_preparation_needed'
+                        self.message = ('Service restarted before an empty baseline was saved; '
+                                        'close and reopen the tray empty to start a fresh calibration')
+                    else:
+                        self.calibration_started = now
+                        self.calibration_frames = []
+                        self.previous_frame = None
+                        self.calibration_reference = self.background.copy()
             else:
                 self.stage = 'empty_view_preparation_needed'
                 self.message = ('Tray was already open at service startup; no new empty-opening '
@@ -140,15 +161,20 @@ class TrayPreparation:
             self.cycle_started_at = time.time()
             self.event_id = None
             self.manual_empty_reference = None
+            self.calibration_reference = None
             self.calibration_frames = []
             self.previous_frame = None
             self.stable_empty_frames = 0
             self.calibration_started = None
             if self.background is not None:
-                self.stage = 'tray_open_waiting_for_disc_removal'
-                self.message = ('Completed disc may still be in the open tray; remove it and wait for '
-                                'the saved empty scene to return' if self.post_eject_job is not None else
-                                'Tray open; checking for an empty scene before refreshing the baseline')
+                if self.post_eject_job is not None:
+                    self.stage = 'tray_open_waiting_for_disc_removal'
+                    self.message = ('Completed disc may still be in the open tray; remove it. '
+                                    'The next manual empty-tray opening will prepare the baseline')
+                else:
+                    self._start_calibration(now,
+                        'Tray opened; validating the saved empty view before refreshing calibration')
+                    self.calibration_reference = self.background.copy()
             else:
                 self.stage = 'calibrating_empty_tray'
                 self.calibration_started = now
@@ -156,6 +182,9 @@ class TrayPreparation:
         elif transition == 'closed':
             self.previous_frame = None
             self.stable_empty_frames = 0
+            if self.post_eject_empty_seen:
+                self.post_eject_job = None
+                self.post_eject_empty_seen = False
             if self.stage not in ('capturing', 'recognising_scanning', 'ripping', 'awaiting_review'):
                 self.stage = 'tray_closed'
                 self.message = 'Tray closed'
@@ -163,6 +192,7 @@ class TrayPreparation:
 
     def note_arm_ejected(self, job):
         self.post_eject_job = int(job)
+        self.post_eject_empty_seen = False
         if self.tray_state == 'open' and self.background is not None:
             self.stage = 'tray_open_waiting_for_disc_removal'
             self.message = 'ARM ejected the completed disc; remove it before preparing the next disc'
@@ -173,10 +203,12 @@ class TrayPreparation:
         self.message = message
         self.calibration_started = now
         self.calibration_frames = []
+        self.calibration_reference = (self.previous_frame.copy()
+                                      if self.previous_frame is not None else None)
         self.previous_frame = None
         self._save()
 
-    def observe_frame(self, frame, *, stable, disc_like=False, now=None):
+    def observe_frame(self, frame, *, stable, now=None):
         now = time.monotonic() if now is None else now
         if self.tray_state != 'open':
             return self.snapshot()
@@ -188,8 +220,15 @@ class TrayPreparation:
             self.stable_empty_frames = self.stable_empty_frames + 1 if matches and frame_stable and stable else 0
             self.previous_frame = frame.copy()
             if self.stable_empty_frames >= 8:
-                self._start_calibration(now, 'Empty scene confirmed; refreshing the baseline once for this opening')
-            else:
+                if self.post_eject_job is not None:
+                    if not self.post_eject_empty_seen:
+                        self.post_eject_empty_seen = True
+                        self.message = ('Completed disc removal confirmed; close the tray manually. '
+                                        'The next empty-tray opening will prepare the baseline')
+                        self._save()
+                else:
+                    self._start_calibration(now, 'Empty scene confirmed; refreshing the baseline once for this opening')
+            elif not self.post_eject_empty_seen:
                 self.message = ('Completed disc is still visible or the scene differs from the saved empty view; '
                                 'remove the disc and wait' if self.post_eject_job is not None else
                                 'Tray open; waiting for a stable match to the saved empty view')
@@ -207,13 +246,15 @@ class TrayPreparation:
                     self.manual_empty_reference = None
                     self._save()
                     return self.snapshot()
-                # An explicit empty-view confirmation disambiguates the tray's
-                # own molded circles; a later scene change still aborts this cycle.
-                disc_like=False
-            if disc_like:
+            elif self.calibration_reference is None:
+                # Fixed molded tray rings are not evidence of a disc. Anchor the
+                # first open-tray frame and detect scene changes during calibration.
+                self.calibration_reference = frame.copy()
+            elif not self.scene_matches(frame,self.calibration_reference,
+                                        threshold=35,fraction=0.12):
                 self.stage = 'early_disc_during_calibration'
-                self.message = ('Disc-like object detected before empty calibration completed; remove it, '
-                                'then use Reset empty view')
+                self.message = ('The tray scene changed before calibration completed; '
+                                'remove the disc and reopen the empty tray')
                 self.calibration_frames = []
                 self._save()
                 return self.snapshot()
@@ -260,11 +301,11 @@ class TrayPreparation:
             if os.path.exists(name):
                 os.unlink(name)
 
-    def reset_empty_view(self, frame, *, disc_like=False, user_confirmed_empty=False, now=None):
+    def reset_empty_view(self, frame, *, user_confirmed_empty=False, now=None):
         if self.tray_state != 'open':
             raise ValueError('Reset empty view requires the tray to be reliably open')
-        if disc_like and not user_confirmed_empty:
-            raise ValueError('A disc-like object is visible; remove it before resetting the empty view')
+        if not user_confirmed_empty:
+            raise ValueError('Explicit operator confirmation is required to reset the empty view')
         if not self.cycle_id:
             self.cycle_id=str(uuid4())
             self.cycle_started_at=time.time()
@@ -272,6 +313,7 @@ class TrayPreparation:
                                 'Manual Reset empty view requested; waiting for a stable empty scene')
         self.previous_frame = frame.copy()
         self.manual_empty_reference = frame.copy() if user_confirmed_empty else None
+        self.calibration_reference = frame.copy()
 
     def set_stage(self, stage, message=None, event_id=None):
         if stage not in self.STAGES:

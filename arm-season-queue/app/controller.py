@@ -144,7 +144,7 @@ class Controller:
                 'camera_mode':self.s.camera_mode,'fileflows_enabled':self.s.fileflows_enabled,
                 'ready':bool(arm.get('ready') and models.get('ready') and not storage_issues and not tray_issues)}
 
-    def activate(self, master_id=None, start_disc=None, start_entry=None):
+    def activate(self, master_id=None, start_disc=None, start_entry=None, *, fresh_unrestricted=False):
         with self.lock:
             if self.s.dry_run_only:
                 raise ValueError('This deployment is locked to dry-run mode; ARM jobs cannot be configured or started')
@@ -159,6 +159,30 @@ class Controller:
             if report['issues']:
                 raise ValueError('; '.join(report['issues']))
             master = next((m for m in self.masters() if m.id==master_id),None) if master_id else None
+            if fresh_unrestricted:
+                if master_id is not None or start_disc is not None or start_entry is not None:
+                    raise ValueError('A fresh unrestricted session cannot include a masterlist or starting hint')
+                if not getattr(self.s,'local_beta',False):
+                    raise ValueError('Fresh unrestricted sessions require LOCAL_BETA_ENABLED=true')
+                active_batch=self.db.get('active_batch')
+                if active_batch:
+                    rows=self.db.rows('SELECT state FROM batches WHERE id=?',(active_batch,))
+                    if rows and rows[0]['state']!='cancelled':
+                        raise ValueError('End the prior batch with Cancel batch before starting a fresh unrestricted session')
+                camera_state=self.get_tray_status() if self.get_tray_status else None
+                if (not camera_state or camera_state.get('connected') is not True
+                        or camera_state.get('mode')!='auto'):
+                    raise ValueError('Fresh unrestricted session requires the connected camera in Automatic mode')
+                if (camera_state.get('tray_state')!='closed'
+                        or camera_state.get('preparation_stage')!='tray_closed'):
+                    raise ValueError('Fresh unrestricted session requires the tray to be physically closed')
+                drives=self.arm.call('GET','/drives').get('drives',[])
+                if any(drive.get('job_id_current') is not None for drive in drives):
+                    raise ValueError('Fresh unrestricted session blocked while an ARM drive has a current insertion')
+                active=[job for job in self.arm.jobs()
+                        if job.get('status') not in ('success','fail','cancelled')]
+                if active:
+                    raise ValueError('Fresh unrestricted session blocked until active ARM jobs are resolved')
             if master_id and master is None:
                 raise ValueError('Optional batch context does not identify a loaded reference')
             if master is not None and not master.approved and not getattr(self.s,'local_beta',False):
@@ -172,14 +196,15 @@ class Controller:
                 if isinstance(start_entry,bool) or not isinstance(start_entry,int) or not 0<=start_entry<len(selected_disc.episodes):
                     raise ValueError('Starting-entry hint is outside the selected disc')
             self.baseline()
-            batch=self.select_batch(master,{'disc':start_disc,'entry_index':start_entry})
+            batch=self.select_batch(master,{'disc':start_disc,'entry_index':start_entry},
+                                    fresh=fresh_unrestricted)
             return batch
 
-    def select_batch(self, master, context=None):
+    def select_batch(self, master, context=None, *, fresh=False):
         batch_identity=digest(master) if master else digest({'batch_context':None})
         existing = [r for r in self.db.rows("SELECT * FROM batches WHERE state!='cancelled'")
                     if digest(json.loads(r['master']))==batch_identity]
-        batch = existing[0]['id'] if existing else str(uuid4())
+        batch = existing[0]['id'] if existing and not fresh else str(uuid4())
         requested_context=context or {'disc':None,'entry_index':None}
         contexts=self.db.get('batch_contexts',{})
         if existing and batch in contexts and contexts[batch].get('start')!=requested_context:
@@ -825,6 +850,7 @@ class Controller:
             if old and old['status'] in ('processing','invalidated','expired'):
                 body = json.loads(old['body'])
                 event_source = body.get('source')
+                body.setdefault('stage_times', {})['recognition_completed_at'] = time.time()
                 if event_source in ('vision_test', 'manual_test'):
                     status = 'review'
                 elif event_source == 'camera' and not (pass_result or beta_capture):
@@ -1473,6 +1499,12 @@ class Controller:
             'mapping_source': mapping_source, 'identity_fields': identity,
             'ordinal_mapping':inference,
             'tray_cycle':body.get('tray_cycle'),
+            'stage_times':{
+                'capture_created_at':event.get('created'),
+                'recognition_completed_at':(body.get('stage_times') or {}).get('recognition_completed_at'),
+                'scan_received_at':time.time(),
+                'reserved_at':time.time(),
+            },
             'warnings': list(dict.fromkeys(warnings)),
         }
         try:
@@ -1490,12 +1522,17 @@ class Controller:
         if job_identity(detail['job'])!=payload['identity']:
             raise ValueError('ARM job identity changed')
         if payload.get('workflow') == 'local-beta-v1':
-            payload['arm_progress']={'status':detail['job'].get('status'),
-                                     'updated_at':time.time(),
-                                     'tracks':[{'makemkv_id':t.get('track_number'),
-                                                'status':t.get('status'),'ripped':t.get('ripped'),
-                                                'error':t.get('error'),'enabled':t.get('enabled')}
-                                               for t in detail.get('tracks',[])]}
+            progress={'status':detail['job'].get('status'),
+                      'updated_at':time.time(),'errors':detail['job'].get('errors'),
+                      'tracks':[{'makemkv_id':t.get('track_number'),
+                                 'status':t.get('status'),'ripped':t.get('ripped'),
+                                 'error':t.get('error'),'enabled':t.get('enabled')}
+                                for t in detail.get('tracks',[])]}
+            history=payload.setdefault('arm_progress_history',[])
+            if (not history or any(history[-1].get(key)!=progress.get(key)
+                                   for key in ('status','errors','tracks'))):
+                history.append(progress)
+            payload['arm_progress']=progress
             self.db.execute('UPDATE reservations SET body=? WHERE job=?',(encode(payload),job))
         status = detail['job']['status']
         if row['state']=='ripped':
@@ -1533,6 +1570,8 @@ class Controller:
                 raise ValueError('Stored recognition lacks exact-model agreement or explicit fresh-capture human authorization; rip start blocked')
             if structure(detail)!=payload['structure_signature']:
                 raise ValueError('Prescanned title structure changed before configuration')
+            stage_times=payload.setdefault('stage_times',{})
+            stage_times.setdefault('configuration_started_at',time.time())
             if payload.get('workflow') == 'local-beta-v1':
                 if payload.get('mapping_source') == 'approved masterlist mapping':
                     preview = self.arm.configure(job,Masterlist.model_validate(payload['masterlist']),payload['mapping'])
@@ -1542,11 +1581,13 @@ class Controller:
                 master = Masterlist.model_validate(payload['masterlist'])
                 preview = self.arm.configure(job,master,payload['mapping'])
             payload['naming_preview']=preview
+            stage_times['rip_start_intent_at']=time.time()
             self.db.execute("UPDATE reservations SET body=?,state='starting' WHERE job=?",(encode(payload),job))
             # Persist intent before a non-idempotent network operation; never blindly retry start.
             self.arm.held()
             self.arm.call('POST',f'/jobs/{job}/start')
             payload['start_request_acknowledged_at'] = time.time()
+            stage_times['rip_start_acknowledged_at']=payload['start_request_acknowledged_at']
             self.db.execute("UPDATE reservations SET body=?,state='ripping' WHERE job=?",(encode(payload),job))
 
     def finish(self,row,detail):
@@ -1654,10 +1695,18 @@ class Controller:
             else:
                 self.on_arm_ejected(job)
         now=time.time()
+        stage_times=dict(payload.get('stage_times') or {})
+        stage_times['rip_completed_observed_at']=now
+        if terminal.get('job',{}).get('start_time'):
+            stage_times['arm_reported_rip_started_at']=terminal['job']['start_time']
+        if terminal.get('job',{}).get('end_time'):
+            stage_times['arm_reported_rip_completed_at']=terminal['job']['end_time']
         review = {'schema_version':1,'job':job,'event':row['event'],'batch':row['batch'],
                   'status':'awaiting_review','workflow':'local-beta-v1','created_at':now,
                   'application_version':self.s.app_version,'recognition':payload['recognition'],
                   'arm_progress':payload.get('arm_progress'),
+                  'arm_progress_history':payload.get('arm_progress_history',[]),
+                  'stage_times':stage_times,
                   'observed_label':payload.get('observed_label'),
                   'identity_fields':payload.get('identity_fields',{}),
                   'model_metadata':{'tags':(payload['recognition'].get('result') or {}).get('model_tags',[]),
@@ -1688,7 +1737,7 @@ class Controller:
     def review_local_beta(self, job, action, request):
         if not getattr(self.s,'local_beta',False):
             raise ValueError('Local beta review is not enabled')
-        if action not in ('accept','save_reviewed','needs_attention'):
+        if action not in ('accept','save_reviewed','needs_attention','mark_incorrect'):
             raise ValueError('Unknown local review action')
         with self.lock:
             rows=self.db.rows('SELECT * FROM reservations WHERE job=?',(job,))
@@ -1846,8 +1895,11 @@ class Controller:
             })
             review['feedback']={'reviewed_fields':sorted(set(reviewed_fields)),
                                 'corrections':review['review_history'][-1]['corrections'],
-                                'assessment':action,'notes':str(request.get('notes') or '')[:2000]}
-            review['status']={'accept':'accepted','save_reviewed':'reviewed','needs_attention':'needs_attention'}[action]
+                                'assessment':{'accept':'correct','save_reviewed':'unassessed',
+                                              'needs_attention':'unassessed','mark_incorrect':'incorrect'}[action],
+                                'notes':str(request.get('notes') or '')[:2000]}
+            review['status']={'accept':'accepted','save_reviewed':'reviewed',
+                              'needs_attention':'needs_attention','mark_incorrect':'needs_attention'}[action]
             review['updated_at']=time.time()
             payload['local_review']=review
             # Fail before changing SQLite/files if the persistent review folder

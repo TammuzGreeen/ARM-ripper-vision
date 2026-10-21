@@ -78,8 +78,6 @@ class Camera:
         self.best_fallback = None
         self.best_fallback_full = None
         self.best_fallback_sharpness = -1.0
-        self.last_disc_check = 0.0
-        self.disc_candidate = False
         self.short_transcriptions = {}
         self.diagnostic_busy = False
         self.status = {'connected':False, 'message':'Connecting to camera', 'calibrated':False,
@@ -93,23 +91,6 @@ class Camera:
             if self.preparation:
                 data.update(self.preparation.snapshot())
             return data
-
-    @staticmethod
-    def disc_like(gray):
-        """Conservative local circular-object guard for first-time empty calibration."""
-        if gray is None or gray.shape != (100,160):
-            return False
-        # Empty trays have molded concentric rings which the naive circle
-        # detector mistakes for a DVD. A disc occupies the larger disc-radius
-        # band and is centered on the clear presentation area; reject small
-        # inner tray rings and circles elsewhere in the camera view.
-        circles=cv2.HoughCircles(gray.astype('uint8'),cv2.HOUGH_GRADIENT,dp=1.2,minDist=28,
-                                 param1=90,param2=30,minRadius=36,maxRadius=49)
-        if circles is None:
-            return False
-        return any(0.32*gray.shape[1] <= x <= 0.62*gray.shape[1]
-                   and 0.32*gray.shape[0] <= y <= 0.68*gray.shape[0]
-                   for x,y,_radius in circles[0])
 
     def capture_deadline_reached(self, now=None):
         now = time.monotonic() if now is None else now
@@ -283,8 +264,7 @@ class Camera:
                 # Reset empty view action. It can override the molded-tray
                 # false positive, but the scene is then frozen and monitored
                 # for changes throughout this one calibration cycle.
-                self.preparation.reset_empty_view(gray,disc_like=self.disc_like(gray),
-                                                  user_confirmed_empty=True)
+                self.preparation.reset_empty_view(gray,user_confirmed_empty=True)
                 self.background=self.preparation.background
                 self.status.update(self.preparation.snapshot())
                 return
@@ -384,11 +364,7 @@ class Camera:
                     if self.tray_monitor:
                         self._poll_tray_state(now)
                         if self.preparation.tray_state == 'open':
-                            if now-self.last_disc_check >= .5:
-                                self.disc_candidate=self.disc_like(small)
-                                self.last_disc_check=now
-                            self.preparation.observe_frame(small,stable=stable,
-                                                           disc_like=self.disc_candidate,now=now)
+                            self.preparation.observe_frame(small,stable=stable,now=now)
                             self.background=self.preparation.background
                             self.status.update(self.preparation.snapshot())
                     if self.background is None:

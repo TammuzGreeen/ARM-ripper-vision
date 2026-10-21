@@ -18,14 +18,6 @@ from test_core import master
 
 
 class ManualCameraTests(unittest.TestCase):
-    def test_disc_guard_ignores_empty_background_and_detects_disc_sized_centered_circle(self):
-        empty=np.zeros((100,160),dtype=np.float32)
-        self.assertFalse(Camera.disc_like(empty))
-        disc=empty.astype(np.uint8)
-        cv2.circle(disc,(68,53),40,180,2)
-        cv2.circle(disc,(68,53),5,0,-1)
-        self.assertTrue(Camera.disc_like(disc))
-
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)

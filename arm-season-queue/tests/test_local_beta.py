@@ -225,6 +225,102 @@ class LocalBetaTests(unittest.TestCase):
             self.assertTrue(all(str(x['destination']).startswith(str(media/'completed'/'tv')) for x in payload['mapping']))
             self.assertTrue(all('arm-season-queue/job-' not in x['destination'] for x in payload['mapping']))
 
+    def test_consecutive_different_series_and_no_match_keep_fresh_per_insertion_identity(self):
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);media=root/'media';media.mkdir(parents=True)
+            c=Controller.__new__(Controller);c.lock=threading.RLock();c.s=SimpleNamespace(
+                local_beta=True,drive='/dev/sr0',media=media,beta_min_free_bytes=1,
+                arm_media='/home/arm/media')
+            c.db=Store(root/'state'/'queue.sqlite3');c.masters=lambda:[]
+            current={'job':None}
+            c.arm=SimpleNamespace(held=Mock(),
+                completed_directory=lambda job,master:Path(f"/home/arm/media/completed/job-{job['job_id']}"),
+                jobs=lambda:[{'job_id':current['job'],'status':'manual_paused'}],
+                call=lambda method,path,body=None:{'drives':[{'mount':'/dev/sr0',
+                    'job_id_current':current['job'],'drive_mode':'auto'}]})
+            identities=[{'series_display':'Star Trek: Deep Space Nine','season':2},
+                        {'series_display':'The Expanse','season':1},{}]
+            for job,identity in enumerate(identities,20):
+                current['job']=job
+                event_id=c.db.new_event('camera')
+                c.db.execute("UPDATE events SET status='ready',released=1,job=? WHERE id=?",(job,event_id))
+                detail={'job':{'job_id':job,'status':'manual_paused','manual_start':False,
+                               'devpath':'/dev/sr0','start_time':f'2026-10-21T07:00:{job}'},
+                        'tracks':[{'track_id':job*10,'track_number':'0','length':1200}]}
+                body={'source':'camera','result':{'camera':'/dev/video0','backend':'ollama-agreement',
+                    'frames':[{'evidence':f'{event_id}/0.jpg'}],
+                    'agreement':{'working_identification':identity}},'matches':[]}
+                c.reserve_local_beta({'id':event_id,'body':encode(body),'created':time.time()},
+                                     {'id':'fresh-session'},detail,body)
+                reservation=c.db.rows('SELECT body FROM reservations WHERE job=?',(job,))[0]
+                saved=json.loads(reservation['body'])
+                self.assertEqual(saved['recognition']['result']['agreement']['working_identification'],identity)
+                self.assertEqual(saved['mapping'][0]['mapping_status'],'provisional')
+                self.assertEqual(saved['mapping'][0]['makemkv_id'],0)
+            self.assertIn('Deep Space Nine',json.loads(c.db.rows('SELECT body FROM reservations WHERE job=20')[0]['body'])['mapping'][0]['basename'])
+            self.assertIn('The Expanse',json.loads(c.db.rows('SELECT body FROM reservations WHERE job=21')[0]['body'])['mapping'][0]['basename'])
+            self.assertTrue(json.loads(c.db.rows('SELECT body FROM reservations WHERE job=22')[0]['body'])['mapping'][0]['basename'].startswith('Source Title'))
+
+    def test_fresh_unrestricted_session_has_no_masterlist_or_cursor_and_is_unique(self):
+        with TemporaryDirectory() as tmp:
+            c=Controller.__new__(Controller);c.db=Store(Path(tmp)/'queue.sqlite3')
+            c.db.execute('INSERT INTO batches VALUES (?,?,?)',
+                         ('old-voyager','{"id":"voyager","season":2,"discs":[]}', 'running'))
+            c.db.put('active_batch','old-voyager')
+            c.db.put('batch_contexts',{'old-voyager':{'start':{'disc':'voyager-s2-d1','entry_index':2}}})
+            first=c.select_batch(None,{'disc':None,'entry_index':None},fresh=True)
+            first_row=c.db.rows('SELECT master,state FROM batches WHERE id=?',(first,))[0]
+            first_context=c.db.get('batch_contexts')[first]
+            second=c.select_batch(None,{'disc':None,'entry_index':None},fresh=True)
+            self.assertNotEqual(first,'old-voyager');self.assertNotEqual(first,second)
+            self.assertEqual(json.loads(first_row['master']),{'schema_version':1,'batch_context':None})
+            self.assertEqual(first_context['start'],{'disc':None,'entry_index':None})
+            self.assertEqual(c.db.rows('SELECT state FROM batches WHERE id=?',('old-voyager',))[0]['state'],'paused')
+            self.assertEqual(c.db.get('active_batch'),second)
+
+    def test_fresh_unrestricted_activation_requires_closed_tray_and_no_live_arm_job(self):
+        from unittest.mock import patch
+        with TemporaryDirectory() as tmp:
+            c=Controller.__new__(Controller);c.lock=threading.RLock()
+            c.s=SimpleNamespace(dry_run_only=False,recognition_backend='ollama-agreement',local_beta=True)
+            c.db=Store(Path(tmp)/'queue.sqlite3');c.masters=lambda:[]
+            c.arm=SimpleNamespace(inspect=Mock(return_value={'issues':[]}),
+                call=Mock(return_value={'drives':[{'mount':'/dev/sr0','job_id_current':None}]}),
+                jobs=Mock(return_value=[]))
+            c.get_tray_status=lambda:{'connected':True,'mode':'auto','tray_state':'open',
+                                      'preparation_stage':'ready_for_disc'}
+            c.baseline=Mock();c.select_batch=Mock(return_value='new-session')
+            with patch('app.controller.agreement_preflight',return_value={'ready':True}):
+                with self.assertRaisesRegex(ValueError,'physically closed'):
+                    c.activate(fresh_unrestricted=True)
+            c.get_tray_status=lambda:{'connected':True,'mode':'auto','tray_state':'closed',
+                                      'preparation_stage':'tray_closed'}
+            with patch('app.controller.agreement_preflight',return_value={'ready':True}):
+                self.assertEqual(c.activate(fresh_unrestricted=True),'new-session')
+            c.select_batch.assert_called_once_with(None,{'disc':None,'entry_index':None},fresh=True)
+
+    def test_fresh_unrestricted_activation_requires_prior_batch_cancelled(self):
+        from unittest.mock import patch
+        with TemporaryDirectory() as tmp:
+            c=Controller.__new__(Controller);c.lock=threading.RLock()
+            c.s=SimpleNamespace(dry_run_only=False,recognition_backend='ollama-agreement',local_beta=True)
+            c.db=Store(Path(tmp)/'queue.sqlite3');c.db.put('active_batch','old-target')
+            c.db.execute('INSERT INTO batches VALUES (?,?,?)',('old-target','{}','running'))
+            c.masters=lambda:[];c.arm=SimpleNamespace(inspect=Mock(return_value={'issues':[]}))
+            with patch('app.controller.agreement_preflight',return_value={'ready':True}):
+                with self.assertRaisesRegex(ValueError,'Cancel batch'):
+                    c.activate(fresh_unrestricted=True)
+
+    def test_local_review_can_record_incorrect_without_claiming_unassessed_output_correct(self):
+        with TemporaryDirectory() as tmp:
+            root=Path(tmp);(root/'media').mkdir()
+            c=self._controller(root,[])
+            saved=c.review_local_beta(7,'mark_incorrect',{'notes':'Identity does not match the disc.'})
+            self.assertEqual(saved['status'],'needs_attention')
+            self.assertEqual(saved['feedback']['assessment'],'incorrect')
+            self.assertEqual(saved['review_history'][-1]['action'],'mark_incorrect')
+            self.assertEqual(c.db.rows('SELECT state FROM reservations WHERE job=7')[0]['state'],'needs_attention')
+
     def test_snapshot_close_requires_saved_event_and_explicitly_calls_arm_close(self):
         with TemporaryDirectory() as tmp:
             root=Path(tmp);state=root/'state';media=root/'media'

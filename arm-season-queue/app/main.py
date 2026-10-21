@@ -212,7 +212,8 @@ def create_app(settings=None, start_workers=True):
     async def batch(request:Request):
         body = json.loads(await limited(request))
         return {'batch':await asyncio.to_thread(controller.activate,body.get('master'),
-                                                 body.get('start_disc'),body.get('start_entry'))}
+                                                 body.get('start_disc'),body.get('start_entry'),
+                                                 fresh_unrestricted=body.get('fresh_unrestricted',False))}
 
     @app.post('/api/dry-run')
     async def dry_run(request:Request):

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from app.tray_monitor import TrayMonitor, CDS_NO_DISC, CDS_TRAY_OPEN, CDS_DRIVE_NOT_READY
@@ -34,6 +35,14 @@ class TrayMonitorTests(unittest.TestCase):
         reading=monitor.poll(now=.5)
         self.assertEqual(reading['state'],'unknown')
         self.assertIn('unavailable',reading['error'])
+
+    def test_reliable_closed_tray_recovers_from_a_temporary_unavailable_stage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prep=TrayPreparation(tmp,'/dev/arm-monitor')
+            prep.tray_observation('unknown',now=0)
+            self.assertEqual(prep.stage,'tray_status_unavailable')
+            prep.tray_observation('closed',now=1)
+            self.assertEqual(prep.stage,'tray_closed')
 
     def test_monitor_opens_device_read_only_and_polling_is_bounded(self):
         calls=[]
@@ -74,6 +83,20 @@ class TrayPreparationTests(unittest.TestCase):
             np.testing.assert_array_equal(prep.background,frozen)
             self.assertEqual(prep.cycle_id,cycle)
 
+    def test_fixed_molded_tray_rings_do_not_block_automatic_empty_calibration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prep=TrayPreparation(tmp,'/dev/arm-monitor',settle_seconds=.5,calibration_samples=3)
+            prep.tray_observation('closed',initial=True,now=0)
+            prep.tray_observation('open',transition='open',now=1)
+            empty=self.frame(20).astype(np.uint8)
+            cv2.circle(empty,(68,53),48,80,2)
+            cv2.circle(empty,(68,53),33,120,2)
+            cv2.circle(empty,(68,53),8,0,-1)
+            for i in range(10):
+                prep.observe_frame(empty,stable=True,now=2+i*.2)
+            self.assertEqual(prep.stage,'ready_for_disc')
+            np.testing.assert_array_equal(prep.background,empty)
+
     def test_post_rip_eject_waits_for_disc_removal_before_refreshing_baseline(self):
         with tempfile.TemporaryDirectory() as tmp:
             prep=TrayPreparation(tmp,'/dev/arm-monitor',settle_seconds=.5,calibration_samples=3)
@@ -91,6 +114,12 @@ class TrayPreparationTests(unittest.TestCase):
             t=15
             for i in range(10):
                 prep.observe_frame(original,stable=True,now=t+i*.2)
+            self.assertEqual(prep.stage,'tray_open_waiting_for_disc_removal')
+            self.assertTrue(prep.post_eject_empty_seen)
+            self.assertIn('close the tray manually',prep.message)
+            prep.tray_observation('closed',transition='closed',now=18)
+            self.assertIsNone(prep.post_eject_job)
+            prep.tray_observation('open',transition='open',now=19)
             self.assertEqual(prep.stage,'calibrating_empty_tray')
             for i in range(10):
                 prep.observe_frame(original,stable=True,now=20+i*.2)
@@ -102,11 +131,13 @@ class TrayPreparationTests(unittest.TestCase):
             prep=TrayPreparation(tmp,'/dev/arm-monitor',settle_seconds=.5,calibration_samples=3)
             prep.tray_observation('closed',initial=True,now=0)
             prep.tray_observation('open',transition='open',now=1)
-            prep.observe_frame(self.frame(50),stable=True,disc_like=True,now=2)
+            prep.observe_frame(self.frame(50),stable=True,now=2)
+            self.assertEqual(prep.stage,'calibrating_empty_tray')
+            prep.observe_frame(self.frame(220),stable=True,now=2.2)
             self.assertEqual(prep.stage,'early_disc_during_calibration')
-            with self.assertRaisesRegex(ValueError,'remove it'):
-                prep.reset_empty_view(self.frame(),disc_like=True,now=3)
-            prep.reset_empty_view(self.frame(),disc_like=True,user_confirmed_empty=True,now=4)
+            with self.assertRaisesRegex(ValueError,'Explicit operator confirmation'):
+                prep.reset_empty_view(self.frame(),now=3)
+            prep.reset_empty_view(self.frame(),user_confirmed_empty=True,now=4)
             self.assertEqual(prep.stage,'calibrating_empty_tray')
             self.assertIsNone(prep.background)
 
@@ -116,10 +147,10 @@ class TrayPreparationTests(unittest.TestCase):
             prep.tray_observation('closed',initial=True,now=0)
             prep.tray_observation('open',transition='open',now=1)
             empty=self.frame(20)
-            prep.reset_empty_view(empty,disc_like=True,user_confirmed_empty=True,now=2)
-            prep.observe_frame(empty,stable=True,disc_like=True,now=3)
+            prep.reset_empty_view(empty,user_confirmed_empty=True,now=2)
+            prep.observe_frame(empty,stable=True,now=3)
             self.assertEqual(prep.stage,'calibrating_empty_tray')
-            prep.observe_frame(self.frame(220),stable=True,disc_like=True,now=4)
+            prep.observe_frame(self.frame(220),stable=True,now=4)
             self.assertEqual(prep.stage,'early_disc_during_calibration')
 
     def test_startup_open_requires_persisted_context_or_manual_recovery(self):
@@ -128,12 +159,16 @@ class TrayPreparationTests(unittest.TestCase):
             prep.tray_observation('open',initial=True,now=0)
             self.assertEqual(prep.stage,'empty_view_preparation_needed')
             self.assertIn('already open',prep.message)
-            prep.reset_empty_view(self.frame(),disc_like=False,now=1)
+            prep.reset_empty_view(self.frame(),user_confirmed_empty=True,now=1)
             cycle=prep.cycle_id
             prep2=TrayPreparation(tmp,'/dev/arm-monitor',settle_seconds=.5,calibration_samples=3)
             prep2.tray_observation('open',initial=True,now=2)
+            self.assertEqual(prep2.stage,'empty_view_preparation_needed')
+            self.assertIn('Service restarted',prep2.message)
+            prep2.tray_observation('closed',transition='closed',now=3)
+            prep2.tray_observation('open',transition='open',now=4)
             self.assertEqual(prep2.stage,'calibrating_empty_tray')
-            self.assertEqual(prep2.cycle_id,cycle)
+            self.assertNotEqual(prep2.cycle_id,cycle)
 
     def test_capture_is_retained_when_expected_tray_close_occurs(self):
         with tempfile.TemporaryDirectory() as tmp:

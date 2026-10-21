@@ -11,6 +11,17 @@ reservation before it configures or starts a job.
 
 ## Selection and naming policy
 
+- A fresh unrestricted session has no required series, season, disc, starting
+  cursor, or pinned masterlist. End the old batch with **Cancel batch**, then use
+  **Start fresh unrestricted beta session**. Activation requires a connected
+  Automatic-mode camera, a reliably closed tray, the verified ARM profile and
+  global pause, and no current/active ARM job. It preserves old batches, events,
+  reservations, files and assessments. Masterlists are searched only after
+  image-only model extraction and may optionally enrich a compatible insertion;
+  no-match and different-series results are normal, not “wrong batch” failures.
+  Each fresh insertion keeps its own event, identity observations, model inputs
+  and optional lookup result.
+
 - A unique compatible **approved, scan-backed** masterlist match supplies its
   explicit title selection and names. Its unselected source IDs are recorded
   with a reason.
@@ -61,18 +72,24 @@ open tray. Unavailable, moving and unrecognized states are reported as unknown;
 three consistent samples (0.5 seconds apart by default) debounce transitions.
 
 In Automatic camera mode, a newly observed closed-to-open transition starts a
-preparation cycle. The helper settles for two seconds, checks for a disc-like
-circular object, then collects 12 stable frames before freezing a private empty
-reference. The GUI then says **Ready—place disc**; media presentation is
-captured automatically. The empty reference is never refreshed while waiting
-for media. If a prior baseline exists, an opening first has to match it stably;
-after ARM AUTO_EJECT this prevents a completed disc left in the tray from being
-mistaken for an empty tray. Removal is followed by a one-time baseline refresh.
-The tray cycle and baseline persist across restarts. An already-open tray at
-startup is not treated as a fresh opening unless a reliable persisted open
-cycle exists; otherwise the GUI asks for empty-view preparation. Early placement,
-timeouts, missing camera and unknown tray status have explicit recovery messages
-and **Reset empty view** is available while the tray is reliably open.
+preparation cycle. After a one-second settling interval, 12 stable frames are
+collected and frozen as the private empty reference. Molded tray rings are not
+treated as a disc; the helper compares the live scene with the opening frame or
+previously saved empty reference. A scene change before calibration completes
+blocks capture and is reported as early placement. The GUI says **Calibrating**
+then **Ready—place disc**; media presentation is captured automatically. The
+baseline is immutable while waiting for media. A saved baseline is validated
+before it is refreshed, so a disc-containing view cannot replace it as empty.
+An already-open tray at startup is not treated as a new opening. If the first
+calibration is interrupted by a restart, close and reopen the tray empty rather
+than resuming an unanchored scene.
+
+ARM AUTO_EJECT owns the opening after a completed rip. The helper waits for the
+finished disc to be removed, then asks the operator to close the tray manually;
+it does **not** calibrate on that automatic post-rip opening. The next manual
+empty-tray opening starts preparation. Read-only tray state is obtained from
+the helper's Linux tray ioctl on the configured drive; ARM's source-verified
+API is used only for the supported close operation after evidence is saved.
 
 For a fresh automatic capture, the original and cropped frames are persisted
 and flushed before the companion invokes ARM's explicit `close` API. That ARM
@@ -98,9 +115,10 @@ deployment; current images remain local and FileFlows stays disabled.
 
 ## Review and feedback
 
-The authenticated GUI has a local review list. **Accept**, **Save corrections
-and mark reviewed**, and **Needs attention** do not start another rip, delete
-media, or dispatch downstream work. Original captures, model inputs/responses,
+The authenticated GUI has a local review list. Operators can mark each completed
+result **correct** or **incorrect**, save corrections, or leave it unassessed.
+Unassessed outputs are never described as correct. These actions do not start
+another rip, delete media, or dispatch downstream work. Original captures, model inputs/responses,
 model tags/digests, normalized recognition, optional masterlist provenance,
 ARM source list, actual outputs, checksums, and successive review revisions
 remain in private state. Review is not model training.
