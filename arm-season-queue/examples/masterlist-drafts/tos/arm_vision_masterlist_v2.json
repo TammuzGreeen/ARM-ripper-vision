@@ -1,0 +1,41 @@
+{
+  "schema_version": 2,
+  "id": "tos_s01_bluray_20disc_s01d06_draft",
+  "series": "Star Trek: The Original Series",
+  "season": 1,
+  "title_aliases": [
+    "Star Trek TOS",
+    "Star Trek"
+  ],
+  "edition": "User-described 20-disc Blu-ray box set; exact pressing unverified",
+  "edition_name": "20-disc Blu-ray collection",
+  "approved": false,
+  "provenance": [
+    "Formatted from user-supplied Updated Star Trek TOS Blu-ray Ruleset Instructions on 2026-10-21. No new drive scan performed.",
+    "Supplied ruleset records the user-confirmed collection convention: perspective 1 = Remastered / Enhanced VFX; perspective 2 = Original VFX. Retain both as separate outputs with every available audio and subtitle stream.",
+    "Supplied S1D6 observation: IDs 0/1 use 00000.mpls, 2/3 use 00001.mpls, 4/5 use 00002.mpls, 6/7 use 00003.mpls; each pair is perspective 1 then 2. Raw diagnostic output was not supplied.",
+    "Reported MakeMKV disc description: Star Trek Season 1: Disc 6. This is not asserted to be a scanned filesystem volume label.",
+    "Source IDs and playlists are disc-specific; do not extrapolate their numeric values to other discs."
+  ],
+  "unresolved": [
+    "Episode numbers/identities for the four S1D6 playlist groups are missing; no episode_index assignments invented.",
+    "Exact release fingerprint and complete raw scan/stream inventories remain unavailable.",
+    "Other discs lack supplied disc-specific episode and source records.",
+    "Requested filename policy and paired-source resolution require companion support beyond the current schema."
+  ],
+  "discs": [
+    {
+      "id": "tos_s01_d06",
+      "number": 6,
+      "printed_identifiers": [],
+      "labels": [],
+      "episodes": [],
+      "title_map": [],
+      "mapping_rules": [],
+      "unresolved": [
+        "Four reported playlist pairs are preserved in source_pairs.csv; episode assignments are unresolved.",
+        "Eight reported version sources are not asserted to be the complete disc inventory; extras and streams are unknown."
+      ]
+    }
+  ]
+}
